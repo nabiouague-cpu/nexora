@@ -1,6 +1,6 @@
 // NEXORA — plateforme de gestion du courrier et des documents · ENA Côte d'Ivoire
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { lireCourrier } from './lecture.js';
+import { lireCourrier, normaliser } from './lecture.js';
 
 const SUPABASE_URL = 'https://namzkpsomphnjoyvdlvr.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_GVI7tXnGdNgsvOUFlL9oew_UBZJOPFd';
@@ -141,7 +141,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-17-007';
+const APP_VERSION = '2026-10-17-008';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -478,10 +478,11 @@ async function vueEnregistrer(sens) {
     blire.disabled = true; blire.innerHTML = `${ICONES.scan}Lecture en cours…`;
     vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre">Lecture du document en cours…</div>`;
     try {
-      const data = await lireCourrier(fichier, { types: etat.types, services: etat.services, sens }, (msg) => { vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre">${esc(msg)}</div>`; });
+      const [{ data: contacts }, { data: apprentissage }] = await Promise.all([sb.from('contacts').select('nom').limit(2000), sb.from('apprentissage').select('*')]);
+      const data = await lireCourrier(fichier, { types: etat.types, services: etat.services, sens, contacts: contacts || [], apprentissage: apprentissage || [] }, (msg) => { vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre">${esc(msg)}</div>`; });
       lecture = data; appliquerLecture(data);
       const n = Object.keys(data.champs || {}).length;
-      vue.querySelector('#etat-lecture').innerHTML = n ? `<div class="bandeau vert">${ICONES.ok}Lecture terminée · ${n} champs détectés${data.a_verifier?.length ? ` · ${data.a_verifier.length} à vérifier` : ''}${data.mode === 'ocr' ? ' · document scanné (OCR)' : ''}</div>` : `<div class="bandeau ambre">Aucun champ reconnu : le scan est peut-être trop flou. Remplissez la fiche à la main.</div>`;
+      vue.querySelector('#etat-lecture').innerHTML = n ? `<div class="bandeau vert" title="${esc((data.indices || []).join(' · '))}">${ICONES.ok}Lecture terminée · ${n} champs détectés${data.a_verifier?.length ? ` · ${data.a_verifier.length} à vérifier` : ''}${data.indices?.length ? ' · ' + esc(data.indices.join(' · ')) : ''}</div>` : `<div class="bandeau ambre">Aucun champ reconnu : le scan est peut-être trop flou. Remplissez la fiche à la main.</div>`;
     } catch (err) {
       console.error(err);
       vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau corail">Lecture impossible sur ce fichier. Remplissez la fiche à la main.</div>`;
@@ -496,6 +497,8 @@ async function vueEnregistrer(sens) {
     if (ch.urgence && URGENCES[ch.urgence]) mettre('urgence', ch.urgence);
     const typ = etat.types.find((t) => t.nom.toLowerCase() === String(ch.type || '').toLowerCase()); if (typ) mettre('type', typ.id);
     const srv = etat.services.find((s) => s.nom.toLowerCase() === String(ch.service || '').toLowerCase()); if (srv) mettre('service', srv.id);
+    if (ch.categorie_id) mettre('cat', ch.categorie_id);
+    if (ch.montant && !vue.querySelector('#obs').value) vue.querySelector('#obs').value = `Montant : ${ch.montant}`;
     const fs = vue.querySelector('#fevs'); const evs = r.evenements || [];
     if (evs.length) { fs.style.display = 'flex'; fs.innerHTML = `<legend style="font-size:13px;font-weight:600;padding:0 6px">Dates détectées · ajouter à l'agenda</legend>` + evs.map((e, i) => `<label style="display:flex;align-items:center;gap:12px;font-size:14px;cursor:pointer"><input type="checkbox" data-ev="${i}" checked style="width:18px;height:18px;accent-color:var(--vert-fonce)"><span style="flex:1"><strong>${fmtDateHeure(e.debut)}</strong> — ${esc(e.titre)}${e.lieu ? ' · ' + esc(e.lieu) : ''}</span><span style="font-size:12px;color:var(--muet)">Rappels J-7, J-2, J-1</span></label>`).join(''); }
   };
@@ -515,6 +518,7 @@ async function vueEnregistrer(sens) {
         observations: v('obs'), cree_par: etat.profil.id, lecture_auto: lecture, lecture_auto_le: lecture ? new Date().toISOString() : null,
       };
       const { data: c, error } = await sb.from('courriers').insert(ligne).select('*').single(); if (error) throw error;
+      if (statutFinal !== 'brouillon') apprendre(c).catch(() => {});
       // scan
       if (fichier) {
         const d = new Date(c.date_evenement); const ext = fichier.name.split('.').pop().toLowerCase();
@@ -532,6 +536,14 @@ async function vueEnregistrer(sens) {
   };
   vue.querySelector('#ffiche').onsubmit = (e) => { e.preventDefault(); enregistrer(estArr ? 'recu' : 'envoye'); };
   vue.querySelector('#bbrouillon').onclick = () => enregistrer('brouillon');
+}
+
+// Apprentissage : NEXORA retient ce que la secrétaire associe à un expéditeur (type, service, catégorie, urgence)
+async function apprendre(c) {
+  if (!c.contact_nom) return;
+  const cle = normaliser(c.contact_nom); if (!cle) return;
+  const { data: x } = await sb.from('apprentissage').select('nb').eq('cle', cle).maybeSingle();
+  await sb.from('apprentissage').upsert({ cle, contact_nom: c.contact_nom, type_id: c.type_id, service_id: c.service_id, categorie_id: c.categorie_id, urgence: c.urgence, nb: (x?.nb || 0) + 1, modifie_le: new Date().toISOString() });
 }
 
 async function creerEvenement(e) {
