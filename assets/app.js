@@ -1,5 +1,6 @@
 // NEXORA — plateforme de gestion du courrier et des documents · ENA Côte d'Ivoire
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { lireCourrier } from './lecture.js';
 
 const SUPABASE_URL = 'https://namzkpsomphnjoyvdlvr.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_GVI7tXnGdNgsvOUFlL9oew_UBZJOPFd';
@@ -402,15 +403,13 @@ async function vueEnregistrer(sens) {
     blire.disabled = true; blire.innerHTML = `${ICONES.scan}Lecture en cours…`;
     vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre">Lecture du document en cours…</div>`;
     try {
-      const fd = new FormData(); fd.append('fichier', fichier); fd.append('sens', sens);
-      fd.append('services', JSON.stringify(etat.services.map((s) => s.nom))); fd.append('types', JSON.stringify(etat.types.map((t) => t.nom)));
-      const { data, error } = await sb.functions.invoke('lire-courrier', { body: fd });
-      if (error) throw error;
+      const data = await lireCourrier(fichier, { types: etat.types, services: etat.services, sens }, (msg) => { vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre">${esc(msg)}</div>`; });
       lecture = data; appliquerLecture(data);
-      vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau vert">${ICONES.ok}Lecture terminée · ${data.champs ? Object.keys(data.champs).length : 0} champs détectés${data.a_verifier?.length ? ` · ${data.a_verifier.length} à vérifier` : ''}</div>`;
+      const n = Object.keys(data.champs || {}).length;
+      vue.querySelector('#etat-lecture').innerHTML = n ? `<div class="bandeau vert">${ICONES.ok}Lecture terminée · ${n} champs détectés${data.a_verifier?.length ? ` · ${data.a_verifier.length} à vérifier` : ''}${data.mode === 'ocr' ? ' · document scanné (OCR)' : ''}</div>` : `<div class="bandeau ambre">Aucun champ reconnu : le scan est peut-être trop flou. Remplissez la fiche à la main.</div>`;
     } catch (err) {
       console.error(err);
-      vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau corail">Lecture automatique indisponible pour le moment. Remplissez la fiche à la main.</div>`;
+      vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau corail">Lecture impossible sur ce fichier. Remplissez la fiche à la main.</div>`;
     }
     blire.disabled = false; blire.innerHTML = `${ICONES.scan}Relancer la lecture automatique`;
   };
