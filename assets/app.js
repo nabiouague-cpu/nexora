@@ -141,20 +141,95 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
+const APP_VERSION = '2026-10-17-004';
+const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
+  const email = etat.session?.user?.email || '';
   app.innerHTML = `
   <div class="coque">
     <nav class="menu" aria-label="Navigation principale">
-      <div class="logo">${LOGO()}<div class="sous">Secrétariat · ENA Côte d'Ivoire</div></div>
+      <div class="sb-marque"><div class="logo-badge"><img src="assets/ena.jpeg" alt="ENA Côte d'Ivoire"></div><div><div class="brand-name">ENA</div><div class="sb-sous">École nationale d'administration · Côte d'Ivoire</div></div></div>
       ${PAGES.map(([h, l, i]) => `<a class="nav ${active === i ? 'on' : ''}" href="${h}">${ICONES[i]}${l}</a>`).join('')}
       <div class="espace"></div>
       <a class="nav ${active === 'parametres' ? 'on' : ''}" href="#/parametres">${ICONES.parametres}Paramètres</a>
       <div class="util"><div class="avatar" aria-hidden="true">${initiales(p.nom)}</div><div><div class="nom">${esc(p.nom || '')}</div><div class="role">${ROLES[p.role] || ''}</div></div></div>
     </nav>
-    <main class="contenu" id="vue">${contenu}</main>
+    <main class="contenu">
+      <div class="top-utility">
+        <span class="espace-nom">NEXORA</span>
+        <button type="button" class="tb-recherche" id="tb-rech" title="Recherche globale"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>Rechercher…</span><kbd>Ctrl K</kbd></button>
+        <div class="tb-user" id="tb-notif-zone"><button type="button" class="tb-ico" id="tb-notif" title="Notifications" aria-expanded="false">${ICONES.cloche}<span class="tb-pastille" id="tb-pastille" hidden>0</span></button></div>
+        <span class="tb-version">v${APP_VERSION}</span>
+        <div class="tb-user" id="tb-user-zone"><button type="button" class="user-chip" id="tb-user" aria-expanded="false"><span class="avatar">${initiales(p.nom)}</span><span class="mail">${esc(email)}</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></button></div>
+      </div>
+      <div class="hero">
+        <div class="marque"><div>${LOGO('#1F6B3A', 200)}<p>${SOUS_TITRES[active] || 'Gestion du courrier et des documents du secrétariat'}</p></div></div>
+        <div class="hero-chips" id="hero-chips"><span class="hero-chip"><i></i>${ROLES[p.role] || ''}</span><span class="hero-chip"><i class="corail"></i>${esc(dateLongue(new Date()))}</span></div>
+      </div>
+      <div id="vue" style="display:flex;flex-direction:column;gap:20px">${contenu}</div>
+    </main>
   </div>`;
+  brancherBarre();
   return document.getElementById('vue');
+}
+
+function brancherBarre() {
+  const fermer = () => document.querySelectorAll('.tb-menu').forEach((m) => m.remove());
+  document.getElementById('tb-rech').onclick = () => ouvrirRecherche();
+  document.getElementById('tb-user').onclick = (e) => {
+    e.stopPropagation(); const deja = document.querySelector('#tb-user-zone .tb-menu'); fermer(); if (deja) return;
+    const m = document.createElement('div'); m.className = 'tb-menu';
+    m.innerHTML = `<div class="tb-menu-tete"><b>${esc(etat.profil?.nom || '')}</b><span class="hint">${esc(etat.session?.user?.email || '')} · NEXORA v${APP_VERSION}</span></div>
+      <button type="button" class="tb-menu-item" data-a="actualiser">⟳ Actualiser les données</button>
+      <button type="button" class="tb-menu-item" data-a="mdp">🔑 Changer mon mot de passe</button>
+      <div class="tb-menu-sep"></div><button type="button" class="tb-menu-item danger" data-a="sortir">Se déconnecter</button>`;
+    document.getElementById('tb-user-zone').appendChild(m);
+    m.querySelector('[data-a=actualiser]').onclick = async () => { fermer(); await chargerProfil(); router(); toast('Données actualisées.'); };
+    m.querySelector('[data-a=mdp]').onclick = () => { fermer(); naviguer('#/parametres'); };
+    m.querySelector('[data-a=sortir]').onclick = () => sb.auth.signOut();
+  };
+  document.getElementById('tb-notif').onclick = async (e) => {
+    e.stopPropagation(); const deja = document.querySelector('#tb-notif-zone .tb-menu'); fermer(); if (deja) return;
+    const m = document.createElement('div'); m.className = 'tb-menu'; m.style.minWidth = '320px';
+    m.innerHTML = `<div class="tb-menu-tete"><b>À traiter</b><span class="hint">Chargement…</span></div>`;
+    document.getElementById('tb-notif-zone').appendChild(m);
+    const items = await notifications();
+    m.innerHTML = `<div class="tb-menu-tete"><b>À traiter</b><span class="hint">${items.length ? items.length + ' sujet(s)' : 'Rien en attente'}</span></div>` + (items.length ? items.map((i) => `<a class="tb-notif-item" href="${i.href}"><span style="width:18px;height:18px;color:${i.niveau === 'danger' ? 'var(--bordeaux)' : 'var(--ambre)'}">${ICONES.cloche}</span><span style="flex:1"><b>${esc(i.titre)}</b><small>${esc(i.detail)}</small></span><span class="chip ${i.niveau === 'danger' ? 'corail' : 'ambre'}">${i.nb}</span></a>`).join('') : `<div class="tb-notif-vide">✓ Tout est à jour.</div>`);
+  };
+  document.addEventListener('click', fermer, { once: true });
+  document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); ouvrirRecherche(); } }, { once: true });
+  notifications().then((items) => { const n = items.reduce((s, i) => s + i.nb, 0); const p = document.getElementById('tb-pastille'); if (!p) return; p.hidden = n === 0; p.textContent = n > 99 ? '99+' : n; });
+}
+
+async function notifications() {
+  const auj = aujourdhui(); const d7 = iso(ajouterJours(new Date(), 7));
+  const [retard, rappels, echeances, brouillons] = await Promise.all([
+    sb.from('courriers').select('id', { count: 'exact', head: true }).in('statut', ['recu', 'a_traiter', 'transmis']).lt('echeance', auj),
+    sb.from('rappels').select('id', { count: 'exact', head: true }).lte('declenche_le', new Date().toISOString()).is('lu_le', null),
+    sb.from('courriers').select('id', { count: 'exact', head: true }).in('statut', ['recu', 'a_traiter', 'transmis']).gte('echeance', auj).lte('echeance', d7),
+    sb.from('courriers').select('id', { count: 'exact', head: true }).eq('statut', 'brouillon'),
+  ]);
+  const items = [];
+  if (retard.count) items.push({ titre: 'Courriers en retard', detail: `${retard.count} courrier(s) dont l'échéance est dépassée`, nb: retard.count, niveau: 'danger', href: '#/arrivees' });
+  if (rappels.count) items.push({ titre: 'Rappels', detail: `${rappels.count} rappel(s) à consulter`, nb: rappels.count, niveau: 'warn', href: '#/agenda' });
+  if (echeances.count) items.push({ titre: 'Échéances sous 7 jours', detail: `${echeances.count} courrier(s) à traiter cette semaine`, nb: echeances.count, niveau: 'warn', href: '#/agenda' });
+  if (brouillons.count) items.push({ titre: 'Brouillons non validés', detail: `${brouillons.count} courrier(s) sans numéro d'ordre`, nb: brouillons.count, niveau: 'warn', href: '#/arrivees' });
+  return items;
+}
+
+function ouvrirRecherche() {
+  const m = modale(`<h2>Recherche globale</h2><form id="frg" class="champ"><label for="rg" class="sr">Rechercher</label><input id="rg" type="search" placeholder="N°, expéditeur, objet, mot-clé…" autofocus></form><div id="rg-res" style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow:auto"></div>`);
+  const inp = m.querySelector('#rg'); setTimeout(() => inp.focus(), 0);
+  let t; const chercher = async () => {
+    const q = inp.value.trim(); if (q.length < 2) { m.querySelector('#rg-res').innerHTML = ''; return; }
+    const tt = `%${q.replace(/[%_,]/g, '')}%`;
+    const { data } = await sb.from('v_courriers').select('id,numero_ordre,sens,objet,contact_nom,date_evenement,statut,echeance').neq('statut', 'brouillon').or(`objet.ilike.${tt},contact_nom.ilike.${tt},numero_ordre.ilike.${tt},reference_externe.ilike.${tt},resume.ilike.${tt}`).order('date_evenement', { ascending: false }).limit(15);
+    m.querySelector('#rg-res').innerHTML = (data || []).length ? data.map((c) => `<a href="#/courrier/${c.id}" class="tb-notif-item" style="border:1px solid var(--bord-leger)">${numero(c)}<span style="flex:1;min-width:0"><b>${esc(c.objet)}</b><small>${esc(c.contact_nom)} · ${fmtDate(c.date_evenement)}</small></span>${chipStatut(c)}</a>`).join('') : `<div class="tb-notif-vide">Aucun résultat.</div>`;
+    m.querySelectorAll('a').forEach((a) => a.onclick = () => m.remove());
+  };
+  inp.oninput = () => { clearTimeout(t); t = setTimeout(chercher, 250); };
+  m.querySelector('#frg').onsubmit = (e) => { e.preventDefault(); chercher(); };
 }
 const naviguer = (h) => { if (location.hash === h) router(); else location.hash = h; };
 
@@ -209,7 +284,6 @@ async function vueTableau() {
   vue.innerHTML = `
   <header class="entete"><div class="titre"><div class="fil">${dateLongue(new Date())}</div><h1>Tableau de bord</h1></div>
     <div class="actions">
-      <form id="frech" style="display:flex;gap:8px"><label class="sr" for="q">Rechercher</label><input id="q" class="recherche" type="search" placeholder="Rechercher par n°, expéditeur, objet…" style="width:280px;height:44px"></form>
       ${peutEcrire() ? `<a class="btn principal" href="#/enregistrer/arrivee">${ICONES.plus}Enregistrer un courrier</a>` : ''}
     </div></header>
   <section class="grille4" aria-label="Chiffres du jour">
@@ -229,7 +303,6 @@ async function vueTableau() {
     <div class="tete"><h2>Activité des 7 derniers jours</h2><div class="legende"><span><i style="background:var(--vert-fonce)"></i>Arrivées</span><span><i style="background:var(--corail)"></i>Départs</span></div></div>
     <div class="barres" role="img" aria-label="Arrivées et départs par jour sur 7 jours">${comptes.map((c) => { const d = new Date(c.j); return `<div class="col"><div class="duo"><div class="arr" style="height:${Math.round(c.a / max * 100)}%" title="${c.a} arrivée(s)"></div><div class="dep" style="height:${Math.round(c.d / max * 100)}%" title="${c.d} départ(s)"></div></div><div class="lib">${JOURS_C[d.getDay()]} ${d.getDate()}</div></div>`; }).join('')}</div>
   </section>`;
-  vue.querySelector('#frech').addEventListener('submit', (e) => { e.preventDefault(); sessionStorage.setItem('nexora_q', vue.querySelector('#q').value); naviguer('#/arrivees'); });
   lierLignes(vue);
 }
 
@@ -413,7 +486,7 @@ async function vueEnregistrer(sens) {
     }
     blire.disabled = false; blire.innerHTML = `${ICONES.scan}Relancer la lecture automatique`;
   };
-  const marquer = (id, etatC) => { const ch = vue.querySelector('#' + id)?.closest('.champ'); if (!ch) return; ch.classList.remove('ok', 'verif'); ch.classList.add(etatC); const d = vue.querySelector('#d-' + id); if (d) d.innerHTML = etatC === 'ok' ? '<span class="det">détecté</span>' : '<span class="ver">à vérifier</span>'; };
+  const marquer = (id, etatC) => { const ch = vue.querySelector('#' + id)?.closest('.champ'); if (!ch) return; ch.classList.remove('ok', 'verif'); ch.classList.add(etatC); const d = vue.querySelector('#d-' + id); if (d) d.innerHTML = etatC === 'ok' ? '<span class="lu-det">détecté</span>' : '<span class="lu-ver">à vérifier</span>'; };
   const appliquerLecture = (r) => {
     const ch = r.champs || {}; const av = new Set(r.a_verifier || []);
     const mettre = (id, val) => { if (val === undefined || val === null || val === '') return; const el = vue.querySelector('#' + id); if (!el) return; el.value = val; marquer(id, av.has(id) ? 'verif' : 'ok'); };
