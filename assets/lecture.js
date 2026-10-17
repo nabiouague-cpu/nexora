@@ -91,40 +91,50 @@ function reconnaitreContact(enTete, contacts) {
 }
 
 // ---------- Reconnaissance des champs ----------
-const nettoyer = (s) => s.replace(/[|_~¬]+/g, ' ').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
+const CORRECTIONS_OCR = [[/ao[dtiîu]{1,3}t\b/gi, 'août'], [/a[o0]ut\b/gi, 'août'], [/f[ée]vr?\./gi, 'fév.'], [/([a-z])¢([a-z])/g, '$1è$2'], [/([a-z])€([a-z])/g, '$1è$2'], [/(\d)°(?=\s)/g, '$1e'], [/\bl[’']ENA\b/g, "l'ENA"], [/\bN[o0]t?\s*\//g, 'N° /'], [/\baupr[ée]s\b/gi, 'auprès'], [/\bapr[ée]s\b/gi, 'après'], [/\bd[ée]s\s+(?=\d)/gi, 'dès '], [/\bdipl[o06]mes?\b/gi, (m) => m.replace(/[o06]/, 'ô')]];
+const nettoyer = (s) => { let t = s.replace(/[|_~¬]+/g, ' ').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim(); for (const [re, rep] of CORRECTIONS_OCR) t = t.replace(re, rep); return t; };
+const MOIS_ABR = { janv: 1, jan: 1, fev: 2, fév: 2, fevr: 2, févr: 2, mars: 3, mar: 3, avr: 4, avril: 4, mai: 5, juin: 6, juil: 7, juill: 7, aout: 8, août: 8, sept: 9, sep: 9, oct: 10, nov: 11, dec: 12, déc: 12 };
 function trouverDates(texte) {
   const res = []; const t = texte.replace(/\s+/g, ' ');
   for (const m of t.matchAll(/\b(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})\b/g)) { let a = Number(m[3]); if (a < 100) a += 2000; const mo = Number(m[2]), j = Number(m[1]); if (mo >= 1 && mo <= 12 && j >= 1 && j <= 31 && a > 2000 && a < 2100) res.push({ iso: isoDate(a, mo, j), brut: m[0], pos: m.index, court: m[3].length === 2 }); }
-  const reL = new RegExp(`\\b(?:(${JOURS_FR.join('|')})\\s+)?(\\d{1,2})(?:er)?\\s+(${Object.keys(MOIS_FR).join('|')})\\s+(\\d{4})(?:\\s*(?:à|a|dès|des)\\s*(\\d{1,2})\\s*(?:h|heures?|:)\\s*(\\d{2})?)?`, 'gi');
-  for (const m of t.matchAll(reL)) { const mo = MOIS_FR[m[3].toLowerCase()]; const h = m[5] ? `${pad(m[5])}:${pad(m[6] || '00')}` : null; res.push({ iso: isoDate(Number(m[4]), mo, Number(m[2])), brut: m[0], pos: m.index, heure: h }); }
+  // 15 octobre 2026 · lundi 03 août 2026, à partir de 7 heures 30 minutes · du 03 au 14 août 2026
+  const reL = new RegExp(`\\b(?:(${JOURS_FR.join('|')})\\s+)?(?:du\\s+(\\d{1,2})\\s+au\\s+)?(\\d{1,2})(?:er)?\\s+(${Object.keys(MOIS_FR).join('|')})\\s+(\\d{4})(?:\\s*,?\\s*(?:à partir de|a partir de|à|a|dès|des)\\s*(\\d{1,2})\\s*(?:h\\b|heures?|:)\\s*(\\d{2})?)?`, 'gi');
+  for (const m of t.matchAll(reL)) { const mo = MOIS_FR[m[4].toLowerCase()]; const h = m[6] ? `${pad(m[6])}:${pad(m[7] || '00')}` : null; const a = Number(m[5]); if (m[2]) res.push({ iso: isoDate(a, mo, Number(m[2])), brut: m[0], pos: m.index, debutPeriode: true, finIso: isoDate(a, mo, Number(m[3])) }); res.push({ iso: isoDate(a, mo, Number(m[3])), brut: m[0], pos: m.index, heure: h, finPeriode: !!m[2] }); }
+  // tampon dateur : "27 JUIL 2026", "2 7 JUIL. 2026", "27/JUIL/2026"
+  const reT = new RegExp(`\\b(\\d(?:\\s?\\d)?)\\s*[\\/.-]?\\s*(${Object.keys(MOIS_ABR).join('|')})\\.?\\s*[\\/.-]?\\s*(\\d{4})\\b`, 'gi');
+  for (const m of t.matchAll(reT)) { const j = Number(m[1].replace(/\s/g, '')); const mo = MOIS_ABR[m[2].toLowerCase()]; if (!(j >= 1 && j <= 31 && mo)) continue; const iso = isoDate(Number(m[3]), mo, j); if (res.some((r) => Math.abs(r.pos - m.index) < 30 && (r.iso === iso || r.finIso === iso))) continue; res.push({ iso, brut: m[0], pos: m.index, tampon: true }); }
   return res.sort((a, b) => a.pos - b.pos);
 }
 const REGLES_TYPE = [
-  ['Convocation', /convocation|convoqu|vous convier|invit(?:e|é)s? à (?:assister|participer)|sont priés d'assister|réunion/],
+  ['Convocation', /convocation|convoqu|vous convier|invit(?:e|é)s? à (?:assister|participer)|sont priés d'assister/],
   ['Facture', /\bfacture\b|montant\s+(?:ttc|ht)|à payer|à régler|échéance de paiement|total à payer|avis d'échéance/],
   ['Note de service', /note de service|note circulaire|circulaire/],
   ['Invitation', /invitation|cérémonie|avoir l'honneur de vous inviter|vous inviter|cocktail|vernissage/],
   ['Rapport', /\brapport\b|compte[- ]rendu|procès[- ]verbal/],
   ['Contrat', /\bcontrat\b|convention|protocole d'accord|avenant/],
   ['Bordereau', /bordereau/],
-  ['Colis', /\bcolis\b|livraison|bon de livraison/],
-  ['Demande', /demande d|sollicit|prie de bien vouloir|vous saurais gré|requête|candidature|stage/],
-  ['Réponse', /en réponse à|suite à votre (?:courrier|lettre|demande)|faisant suite/],
+  ['Colis', /\bcolis\b|bon de livraison/],
+  ['Réponse', /accuser réception|en réponse à|suite à votre (?:courrier|lettre|demande|correspondance)|faisant suite|comme suite à/],
+  ['Demande', /demande d|sollicit|prie de bien vouloir|vous saurais? gré|requête|candidature|stage/],
   ['Lettre', /./],
 ];
-function devinerType(texte, types) {
+function devinerType(texte, types, sens) {
   const t = texte.toLowerCase();
-  for (const [nom, re] of REGLES_TYPE) if (re.test(t)) { const typ = types.find((x) => normaliser(x.nom) === normaliser(nom)); if (typ) return typ.nom; }
-  return null;
+  for (const [nom, re] of REGLES_TYPE) if (re.test(t)) { const typ = types.find((x) => normaliser(x.nom) === normaliser(nom) && (x.sens === 'les_deux' || x.sens === sens)); if (typ) return typ.nom; }
+  const l = types.find((x) => normaliser(x.nom) === 'lettre'); return l ? l.nom : null;
 }
 function devinerAction(texte, type) {
-  const t = texte.toLowerCase();
-  if (type === 'Facture' || /facture|montant|règlement|à payer|à régler|paiement/.test(t)) return 'Procéder au paiement';
-  if (type === 'Convocation' || /convocation|convoqu|vous convier|assister|participer|réunion/.test(t)) return 'Assister à la réunion';
-  if (type === 'Invitation' || /invitation|cérémonie/.test(t)) return "Confirmer la participation à l'événement";
-  if (/candidature|stage|recrutement/.test(t)) return 'Examiner la candidature';
-  if (/réponse|répondre|confirmer|faire parvenir|transmettre|communiquer|nous faire tenir|pièces|justificatif/.test(t)) return 'Répondre / transmettre les éléments demandés';
-  if (/pour information|à titre d'information|pour votre information/.test(t)) return 'Pour information';
+  const t = texte.replace(/\s+/g, ' ');
+  const tl = t.toLowerCase();
+  // ce que le courrier demande explicitement
+  const m = t.match(/(?:vous saurai[s]? gré de bien vouloir|vous prie de bien vouloir|voudrais?-je[^.;]{0,40}solliciter[^.;]{0,30}|prière de bien vouloir|bien vouloir|solliciter aupr[èé]s de vous)\s+([^.;]{8,140})/i);
+  if (m) { let a = m[1].trim().replace(/^(?:la |le |l'|les |de |d')/, '').replace(/\bvotre\b/gi, 'sa').replace(/\bvous\b/gi, 'lui'); a = a.charAt(0).toUpperCase() + a.slice(1); if (/^(mise|liste|transmission|communication)/i.test(a)) a = 'Transmettre : ' + a.charAt(0).toLowerCase() + a.slice(1); if (a.length > 110) a = a.slice(0, 110).replace(/\s+\S*$/, '') + '…'; return a; }
+  if (type === 'Facture' || /facture|montant|règlement|à payer|à régler|paiement/.test(tl)) return 'Procéder au paiement';
+  if (type === 'Convocation' || /convocation|convoqu|vous convier|assister|participer/.test(tl)) return 'Assister à la réunion';
+  if (type === 'Invitation' || /invitation|cérémonie/.test(tl)) return "Confirmer la participation à l'événement";
+  if (/candidature|stage|recrutement/.test(tl)) return 'Examiner la candidature';
+  if (/réponse|répondre|confirmer|faire parvenir|transmettre|communiquer|nous faire tenir|pièces|justificatif/.test(tl)) return 'Répondre / transmettre les éléments demandés';
+  if (/pour information|à titre d'information|pour votre information/.test(tl)) return 'Pour information';
   if (type === 'Note de service') return 'Diffuser au personnel concerné';
   return null;
 }
@@ -135,89 +145,147 @@ function devinerUrgence(texte, echeance) {
   if (/pour information|à titre d'information/.test(t)) return 'information';
   return 'normal';
 }
+function serviceDansTexte(texte, services) {
+  const t = normaliser(texte);
+  for (const s of services) { if (s.nom.length > 8 && t.includes(normaliser(s.nom))) return s; }
+  for (const s of services) { if (s.code && s.code.length >= 3 && new RegExp(`\\b${normaliser(s.code)}\\b`).test(t)) return s; }
+  return null;
+}
 function devinerService(texte, services) {
   const t = normaliser(texte);
-  const regles = [[/finan|comptab|facture|paiement|budget|credit|tresor|marche public/, ['SF', 'DAF', 'DFC']], [/ressources humaines|personnel|recrutement|affectation|conge|carriere|candidature/, ['RH', 'DRH']], [/formation|etudiant|eleve|concours|cycle|pedagog|cours|scolarite|stage/, ['DE', 'DEP', 'DF']], [/fourniture|materiel|entretien|logistique|vehicule|colis|livraison|maintenance/, ['MG', 'DMG', 'SMG']]];
+  const nomme = serviceDansTexte(texte, services); if (nomme) return nomme.nom;
+  const regles = [[/finan|comptab|facture|paiement|budget|credit|tresor|marche public/, ['SF', 'DAF', 'DFC']], [/ressources humaines|personnel|recrutement|affectation|conge|carriere|candidature/, ['RH', 'DRH']], [/formation|etudiant|eleve|concours|cycle|pedagog|cours|scolarite|stage|filiere|promotion/, ['DE', 'DEP', 'DF']], [/fourniture|materiel|entretien|logistique|vehicule|colis|livraison|maintenance/, ['MG', 'DMG', 'SMG']]];
   for (const [re, codes] of regles) if (re.test(t)) { const s = services.find((x) => codes.includes(x.code)); if (s) return s.nom; }
-  // service nommé explicitement dans le texte
-  for (const s of services) { if (s.nom.length > 8 && t.includes(normaliser(s.nom))) return s.nom; }
   const dg = services.find((x) => x.code === 'DG'); return dg ? dg.nom : null;
 }
 function extraireMontant(texte) {
-  const m = texte.replace(/\s+/g, ' ').match(/(?:montant|total|net à payer|à payer|à régler)[^\d]{0,30}(\d{1,3}(?:[ .]\d{3})+|\d+)(?:[,.]\d{2})?\s*(f\s?cfa|fcfa|xof|€|eur|\$)/i) || texte.replace(/\s+/g, ' ').match(/(\d{1,3}(?:[ .]\d{3})+)\s*(f\s?cfa|fcfa|xof)/i);
+  const t = texte.replace(/\s+/g, ' ');
+  const m = t.match(/(?:montant|total|net à payer|à payer|à régler)[^\d]{0,30}(\d{1,3}(?:[ .]\d{3})+|\d+)(?:[,.]\d{2})?\s*(f\s?cfa|fcfa|xof|€|eur|\$)/i) || t.match(/(\d{1,3}(?:[ .]\d{3})+)\s*(f\s?cfa|fcfa|xof)/i);
   return m ? `${m[1].replace(/[ .]/g, ' ')} ${m[2].toUpperCase().replace(/\s/g, '')}` : null;
 }
 
-export async function lireCourrier(fichier, contexte, progression) {
-  const { types = [], services = [], sens = 'arrivee', contacts = [], apprentissage = [] } = contexte;
-  progression?.('Extraction du texte…');
-  let brut;
-  if (fichier.type === 'application/pdf') brut = await texteDepuisPdf(fichier, progression);
-  else { progression?.('Préparation de l\'image…'); const img = await createImageBitmap(fichier); const r = await ocrImage(img, progression); brut = { ...r, mode: 'ocr', pages: 1 }; }
-  const texte = nettoyer(brut.texte); const lignes = texte.split('\n').map((l) => l.trim()).filter((l) => l.length > 1);
+// Analyse du texte (indépendante de l'OCR, testable)
+export function analyserTexte(texteBrut, contexte, meta = {}) {
+  const { types = [], services = [], contacts = [], apprentissage = [] } = contexte; let { sens = 'arrivee' } = contexte;
+  const mode = meta.mode || 'pdf', confiance = meta.confiance ?? 100;
+  const texte = nettoyer(texteBrut); const lignes = texte.split('\n').map((l) => l.trim()).filter((l) => l.length > 1);
   const champs = {}; const a_verifier = []; const indices = [];
-  const fiable = brut.mode === 'pdf' || brut.confiance >= 85;
+  const fiable = mode === 'pdf' || confiance >= 85;
+  const posObjet = (() => { const i = texte.search(/\bobjet\s*:/i); return i >= 0 ? i : Math.min(texte.length, 700); })();
+  const enTeteTexte = texte.slice(0, posObjet);
+  const enTete = lignes.filter((l) => texte.indexOf(l) < posObjet).filter((l) => !/republique de cote d ivoire|union\s*discipline\s*travail/i.test(normaliser(l)));
 
-  // --- Expéditeur : mémoire des contacts d'abord, en-tête ensuite
-  const enTete = lignes.slice(0, 14).filter((l) => !/republique|union\s*[-–]?\s*discipline|^\s*$/i.test(normaliser(l)));
-  const connu = reconnaitreContact(enTete, contacts);
-  if (connu) { champs.contact = connu.nom; indices.push('expéditeur reconnu dans vos contacts'); }
-  else {
-    const candidat = enTete.find((l) => /minist|direction|societe|cabinet|universit|ecole|institut|agence|banque|association|mairie|prefecture|ambassade|office|\bsa\b|sarl|\bong\b|groupe|compagnie|fondation|centre|conseil|chambre|federation|syndicat/i.test(normaliser(l)))
-      || enTete.find((l) => l.length > 6 && l === l.toUpperCase() && /[A-ZÉÈ]{4,}/.test(l));
-    if (candidat) { champs.contact = candidat.replace(/\s{2,}/g, ' ').replace(/[.,;:]+$/, '').trim(); if (!fiable) a_verifier.push('contact'); }
+  // --- En-tête de l'ENA elle-même → c'est un courrier qui part (ou interne)
+  const enaEmet = /ecole nationale d administration|\bena\b/.test(normaliser(enTeteTexte.slice(0, 400)));
+  if (enaEmet && sens === 'arrivee') { champs.sens_suggere = 'depart'; indices.push("en-tête de l'ENA : ce courrier semble être un départ"); }
+  const serviceEmetteur = enaEmet ? serviceDansTexte(enTeteTexte, services) : null;
+
+  // --- Destinataire (après « à » / « A ») ou expéditeur (en-tête)
+  const mDest = enTeteTexte.match(/(?:^|\n)\s*(?:à|a|A)\s*\n((?:[^\n]+\n){1,4})/) || enTeteTexte.match(/(?:^|\n)\s*(?:à|a)\s+((?:monsieur|madame|mme|m\.|mr|mademoiselle)[^\n]+(?:\n[^\n]+){0,3})/i);
+  let destinataire = null;
+  if (mDest) { destinataire = mDest[1].split('\n').map((l) => l.trim()).filter((l) => l && !/^[A-ZÉÈ' -]{4,}$/.test(l) && !/objet/i.test(l)).join(' ').replace(/\s+/g, ' ').trim(); }
+  if (!destinataire) {
+    const i = enTete.findIndex((l) => /^(?:monsieur|madame|mesdames|messieurs|mme|m\.|mr|mademoiselle|son excellence)\b/i.test(l) && !/,\s*$/.test(l));
+    if (i >= 0) { const bloc = [enTete[i]]; for (let k = i + 1; k < Math.min(enTete.length, i + 4); k++) { const l = enTete[k]; if (/^[A-ZÉÈ' -]{4,}$/.test(l) || /objet|réf/i.test(l) || /^(?:n[°º]|le |la )/i.test(l)) break; bloc.push(l); } destinataire = bloc.join(' ').replace(/\s+/g, ' ').trim(); }
   }
-
-  // --- Apprentissage : ce que la secrétaire a déjà associé à cet expéditeur
+  const connu = reconnaitreContact(enTete.filter((l) => !/ministere de la fonction publique|modernisation de l administration/.test(normaliser(l)) || !enaEmet), contacts);
+  if (enaEmet || champs.sens_suggere === 'depart' || sens === 'depart') {
+    if (destinataire) { champs.contact = destinataire; if (!fiable) a_verifier.push('contact'); }
+    else if (connu) champs.contact = connu.nom;
+  } else {
+    if (connu) { champs.contact = connu.nom; indices.push('expéditeur reconnu dans vos contacts'); }
+    else {
+      const candidat = enTete.find((l) => /minist|direction|societe|cabinet|universit|ecole|institut|agence|banque|association|mairie|prefecture|ambassade|office|\bsa\b|sarl|\bong\b|groupe|compagnie|fondation|centre|conseil|chambre|federation|syndicat/i.test(normaliser(l)))
+        || enTete.find((l) => l.length > 6 && l === l.toUpperCase() && /[A-ZÉÈ]{4,}/.test(l));
+      if (candidat) { champs.contact = candidat.replace(/\s{2,}/g, ' ').replace(/[.,;:]+$/, '').trim(); if (!fiable) a_verifier.push('contact'); }
+    }
+  }
   const appris = champs.contact ? apprentissage.find((a) => a.cle === normaliser(champs.contact)) : null;
 
-  // --- Référence
-  const mRef = texte.match(/(?:n[°º]|réf(?:érence)?\.?\s*:?|ref\.?\s*:?|n\s*°)\s*:?\s*([A-Z0-9][A-Z0-9\/\-._ ]{2,40})/i);
-  if (mRef) { champs.reference = mRef[0].replace(/\s+/g, ' ').trim().replace(/[.,;:]$/, ''); if (!fiable) a_verifier.push('ref'); }
+  // --- Références : la nôtre (N° …/ENA/…) et celle du courrier auquel on répond (Réf : V/L n° …)
+  const mRefLiee = texte.match(/réf(?:érence)?\.?\s*:?\s*(?:v\/l|votre lettre|votre courrier|v\/c)?\s*n?[°º]?\s*:?\s*([A-Z0-9][A-Z0-9\/\-._ ]{3,40}?)(?:\s+du\s+([^\n]{6,30}))?(?=\n|$)/im);
+  const mNum = enTeteTexte.match(/\bn[°ºo]?\s*t?\s*:?\s*([0-9A-Z]{0,6}\s*\/\s*[A-Z]{2,}(?:\s*\/\s*[A-Z0-9]{2,})+)/i) || enTeteTexte.match(/\bn[°º]\s*:?\s*([A-Z0-9][A-Z0-9\/\-._ ]{2,40}?)(?=\s*\n|\s{2,}|$)/im);
+  if (mNum) { const num = mNum[1].replace(/\s*\/\s*/g, '/').trim(); champs.reference = ('N° ' + num).replace(/\s+/g, ' ').replace(/[.,;:]$/, ''); if (!fiable || /^\//.test(num)) a_verifier.push('ref'); }
+  if (mRefLiee && (!mNum || mRefLiee[1].trim() !== mNum[1].trim())) { champs.reference_liee = mRefLiee[1].trim().replace(/\s+/g, ' '); if (mRefLiee[2]) champs.reference_liee_date = mRefLiee[2].trim(); indices.push('réponse à un courrier référencé'); }
+  if (!champs.reference && mRefLiee && sens !== 'depart' && !enaEmet) champs.reference = mRefLiee[1].trim();
 
   // --- Objet
-  const mObj = texte.match(/objet\s*:?\s*([^\n]+(?:\n(?![A-ZÉ][a-zé]+\s*:)[^\n]{0,120})?)/i);
+  const mObj = texte.match(/objet\s*:?\s*([^\n]+(?:\n(?!(?:réf|ref|r[ée]f[ée]rence|p\.?j|madame|monsieur|mesdames|messieurs)\b)[^\n]{0,120})?)/i);
   if (mObj) champs.objet = mObj[1].replace(/\s+/g, ' ').trim().replace(/[.;]$/, '');
   else { const l = lignes.find((x) => /^(?:convocation|invitation|facture|demande|notification|rapport|note|avis|attestation|lettre)/i.test(x)); if (l) champs.objet = l; }
-  if (champs.objet && !fiable) a_verifier.push('objet');
+  if (champs.objet) { champs.objet = champs.objet.charAt(0).toUpperCase() + champs.objet.slice(1); if (!fiable) a_verifier.push('objet'); }
 
   // --- Dates
   const dates = trouverDates(texte);
-  const posObjet = mObj ? texte.search(/objet\s*:/i) : Math.min(texte.length, 600);
-  const dateCourrier = dates.find((d) => d.pos < posObjet) || (dates[0] && dates[0].pos < 800 ? dates[0] : null);
-  if (dateCourrier) { champs.date_courrier = dateCourrier.iso; if (!fiable || dateCourrier.court) a_verifier.push('dcour'); }
-  const corps = dates.filter((d) => d !== dateCourrier && d.pos >= posObjet);
-  const evenements = [];
+  const dateCourrier = dates.find((d) => d.tampon && d.pos < posObjet) || dates.find((d) => d.pos < posObjet && !d.debutPeriode) || null;
+  if (dateCourrier) { champs.date_courrier = dateCourrier.iso; if (!fiable || dateCourrier.court || dateCourrier.tampon) a_verifier.push('dcour'); }
+  const refDate = mRefLiee && mRefLiee[2] ? trouverDates(mRefLiee[2])[0] : null;
+  const corps = dates.filter((d) => d !== dateCourrier && d.pos >= posObjet && !(refDate && d.iso === refDate.iso));
+  const evenements = []; const vus = new Set();
   for (const d of corps) {
-    const autour = texte.slice(Math.max(0, d.pos - 180), d.pos + 80).replace(/\s+/g, ' ');
-    const estReunion = /réunion|rencontre|séance|cérémonie|atelier|se tiendra|aura lieu|conseil|assemblée|session|entretien|audience|formation/i.test(autour);
-    const estLimite = /avant le|au plus tard|date limite|délai|échéance|jusqu'au|confirmer|à régler|payable|dernier délai|clôture/i.test(autour);
+    const autour = texte.slice(Math.max(0, d.pos - 200), d.pos + 90).replace(/\s+/g, ' ');
+    const passe = /comme suite à ma lettre|ma lettre|votre lettre|votre correspondance|en date du|du \d{1,2}/i.test(texte.slice(Math.max(0, d.pos - 40), d.pos)) && !d.debutPeriode;
+    if (passe) continue;
+    const estReunion = /réunion|rencontre|séance|cérémonie|atelier|se tiendra|aura lieu|conseil|assemblée|session|entretien|audience|formation|débuteront|débutera|commenceront|rentrée|cours/i.test(autour);
+    const estLimite = /avant le|au plus tard|date limite|délai|échéance|jusqu'au|à régler|payable|dernier délai|clôture|disponibilité|période du/i.test(autour);
     if (!estReunion && !estLimite) continue;
+    if (d.debutPeriode) {
+      const cle = 'p' + d.iso; if (vus.has(cle)) continue; vus.add(cle);
+      evenements.push({ titre: `Période · ${(champs.objet || 'présentation').slice(0, 60)}`, type: 'echeance', debut: `${d.iso}T08:00:00`, fin: `${d.finIso}T18:00:00`, lieu: null });
+      if (!champs.echeance) champs.echeance = d.finIso; continue;
+    }
+    if (d.finPeriode) continue;
+    if (vus.has(d.iso + (d.heure || ''))) continue; vus.add(d.iso + (d.heure || ''));
     const lieu = (autour.match(/(?:à|au|dans|en)\s+(?:la\s+|le\s+|l')?(salle[^,.]{0,40}|si[èe]ge[^,.]{0,40}|minist[èe]re[^,.]{0,40}|amphith[ée][âa]tre[^,.]{0,30}|plateau|cocody|yopougon|marcory|treichville|abidjan|[A-ZÉ][\wéèà' -]{3,30}(?=[,.]))/) || [])[1];
-    const titre = estReunion ? (autour.match(/(réunion[^,.]{0,60}|cérémonie[^,.]{0,60}|atelier[^,.]{0,60}|séance[^,.]{0,60}|conseil[^,.]{0,60}|assemblée[^,.]{0,60}|session[^,.]{0,60}|formation[^,.]{0,60})/i) || [, 'Réunion'])[1].trim() : `Date limite · ${(champs.objet || 'réponse').slice(0, 60)}`;
+    let titre;
+    if (estReunion) {
+      const avant = texte.slice(Math.max(0, d.pos - 200), d.pos).replace(/\s+/g, ' ');
+      let clause = avant.split(/[.;:]/).pop().replace(/^[\s,\-–]+|,?\s*(?:le|la|les|l')?\s*$/g, '').trim();
+      clause = clause.replace(/^(?:par ailleurs|à cet effet|a cet effet|en effet|aussi|toutefois|enfin|en outre)\s*,?\s*/i, '').replace(/^(?:je|nous)\s+(?:voudrais?|souhaite|souhaitons|tiens|tenons|vous informe|vous informons)\s+(?:vous\s+)?(?:porter à votre connaissance|porter a votre connaissance|informer|signaler|rappeler|préciser)?\s*(?:que|qu')?\s*/i, '').replace(/^(?:j'ai|nous avons) l'honneur de (?:vous )?(?:informer|porter à votre connaissance)\s*(?:que|qu')?\s*/i, '').trim();
+      clause = clause.charAt(0).toUpperCase() + clause.slice(1);
+      titre = clause.length >= 12 ? clause : (autour.match(/(réunion[^,.]{0,60}|cérémonie[^,.]{0,60}|atelier[^,.]{0,60}|séance[^,.]{0,60}|conseil[^,.]{0,60}|assemblée[^,.]{0,60}|session[^,.]{0,60}|formation[^,.]{0,60}|rentrée[^,.]{0,60})/i) || [, 'Réunion'])[1].trim();
+      if (titre.length > 90) titre = titre.slice(0, 90).replace(/\s+\S*$/, '') + '…';
+    } else titre = `Date limite · ${(champs.objet || 'réponse').slice(0, 60)}`;
     evenements.push({ titre: titre.charAt(0).toUpperCase() + titre.slice(1), type: estReunion ? 'reunion' : 'echeance', debut: `${d.iso}T${d.heure || (estReunion ? '09:00' : '08:00')}:00`, lieu: lieu ? lieu.trim() : null });
     if (estLimite && !champs.echeance) champs.echeance = d.iso;
   }
   if (!champs.echeance && evenements[0]) champs.echeance = evenements[0].debut.slice(0, 10);
 
   // --- Résumé
-  const corpsTexte = texte.slice(posObjet + (champs.objet ? champs.objet.length + 8 : 0)).replace(/\s+/g, ' ');
-  const phrases = corpsTexte.match(/[^.!?]{25,220}[.!?]/g) || [];
-  const utiles = phrases.filter((p) => !/^\s*(monsieur|madame|veuillez agréer|je vous prie|nous vous prions)/i.test(p) && !/considération distinguée|salutations|haute considération/i.test(p)).slice(0, 3);
-  if (utiles.length) champs.resume = utiles.join(' ').trim();
+  const corpsTexte = texte.slice(posObjet).replace(/\s+/g, ' ');
+  const phrases = (corpsTexte.match(/[^.!?;]{25,420}[.!?;]/g) || []).map((p) => p.trim().replace(/^(?:madame|monsieur|mesdames|messieurs)[^,]{0,60},\s*/i, ''));
+  const utiles = phrases.filter((p) => !/^\s*(objet|réf|veuillez agréer|je vous prie de croire|nous vous prions)/i.test(p) && !/considération distinguée|salutations|haute considération/i.test(p)).slice(0, 3);
+  if (utiles.length) { let r = utiles.join(' ').replace(/^(?:réf\s*:[^.]*\.\s*)/i, '').trim(); if (r.length > 380) r = r.slice(0, 380).replace(/\s+\S*$/, '') + '…'; champs.resume = r; }
 
-  // --- Type, action, urgence, service (apprentissage prioritaire sur les règles)
-  const typeDevine = devinerType(texte, types);
+  // --- Signataire et fonction (départ)
+  const fin = lignes.slice(-10);
+  const sig = fin.find((l) => /^[A-ZÉÈÀ][A-ZÉÈÀ' -]{2,}\s+[A-ZÉ][a-zéèàï' -]{2,}$/.test(l.trim())) || fin.find((l) => /^[A-ZÉ][a-zéè]+\s+[A-ZÉÈÀ' -]{3,}$/.test(l.trim()));
+  if (sig) champs.signataire = sig.trim();
+  const fonction = (enTeteTexte.match(/\b(le directeur général|la directrice générale|le directeur|la directrice|le chef de service|la chef de service|le secrétaire général|le coordonnateur|la coordonnatrice|le doyen|le président|le ministre)\b[^\n]{0,40}/i) || [])[0];
+  if (fonction) champs.fonction_signataire = fonction.trim();
+
+  // --- Type, action, urgence, service
+  const sensEffectif = champs.sens_suggere || sens;
+  const typeDevine = devinerType(texte, types, sensEffectif);
   const typeAppris = appris?.type_id ? types.find((t) => t.id === appris.type_id)?.nom : null;
   champs.type = typeAppris || typeDevine;
   const montant = extraireMontant(texte); if (montant) { champs.montant = montant; if (champs.type === 'Facture' && !champs.objet) champs.objet = `Facture ${montant}`; }
   champs.action_demandee = devinerAction(texte, champs.type);
   champs.urgence = appris?.urgence || devinerUrgence(texte, champs.echeance);
-  if (sens === 'arrivee') { const sAppris = appris?.service_id ? services.find((s) => s.id === appris.service_id)?.nom : null; champs.service = sAppris || devinerService(texte, services); }
+  if (sensEffectif === 'depart') { if (serviceEmetteur) champs.service = serviceEmetteur.nom; else if (enaEmet) { const dir = enTete.find((l) => /^(?:école|ecole|direction|service|cellule|centre)\s/i.test(l) && !/nationale d.administration/i.test(l)); if (dir) champs.service_a_creer = dir.replace(/\s{2,}/g, ' ').trim(); } }
+  else { const sAppris = appris?.service_id ? services.find((s) => s.id === appris.service_id)?.nom : null; champs.service = sAppris || devinerService(texte, services); }
   if (appris?.categorie_id) champs.categorie_id = appris.categorie_id;
   if (appris) indices.push('type et service repris de vos enregistrements précédents');
-  if (brut.mode === 'ocr') indices.push(`qualité OCR ${Math.round(brut.confiance)} %`);
+  if (mode === 'ocr') indices.push(`qualité OCR ${Math.round(confiance)} %`);
 
   Object.keys(champs).forEach((k) => { if (champs[k] == null) delete champs[k]; });
-  return { champs, a_verifier: [...new Set(a_verifier)], evenements, indices, mode: brut.mode, pages: brut.pages, confiance: Math.round(brut.confiance), texte_brut: texte.slice(0, 6000) };
+  return { champs, a_verifier: [...new Set(a_verifier)], evenements, indices, mode, pages: meta.pages || 1, confiance: Math.round(confiance), texte_brut: texte.slice(0, 6000) };
+}
+
+export async function lireCourrier(fichier, contexte, progression) {
+  progression?.('Extraction du texte…');
+  let brut;
+  if (fichier.type === 'application/pdf') brut = await texteDepuisPdf(fichier, progression);
+  else { progression?.('Préparation de l\'image…'); const img = await createImageBitmap(fichier); const r = await ocrImage(img, progression); brut = { ...r, mode: 'ocr', pages: 1 }; }
+  return analyserTexte(brut.texte, contexte, { mode: brut.mode, confiance: brut.confiance, pages: brut.pages });
 }

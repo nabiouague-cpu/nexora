@@ -141,7 +141,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-17-008';
+const APP_VERSION = '2026-10-17-009';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -455,6 +455,8 @@ async function vueEnregistrer(sens) {
   <style>@media (max-width:980px){.deux-col{grid-template-columns:1fr !important}}</style>`;
 
   vue.querySelector('#sa').onclick = () => naviguer('#/enregistrer/arrivee');
+  const reprise = sessionStorage.getItem('nexora_lecture');
+  if (reprise) { sessionStorage.removeItem('nexora_lecture'); try { const { lecture: r, nom } = JSON.parse(reprise); lecture = r; setTimeout(() => { appliquerLecture(r); vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau vert">${ICONES.ok}Lecture reprise (${esc(nom || 'document')}) · pensez à rattacher à nouveau le scan</div>`; }, 50); } catch (e) { /* ignore */ } }
   vue.querySelector('#sd').onclick = () => naviguer('#/enregistrer/depart');
   // contacts pour l'autocomplétion
   sb.from('contacts').select('nom').order('nom').limit(500).then(({ data }) => { vue.querySelector('#lcontacts').innerHTML = (data || []).map((c) => `<option value="${esc(c.nom)}">`).join(''); });
@@ -490,8 +492,23 @@ async function vueEnregistrer(sens) {
     blire.disabled = false; blire.innerHTML = `${ICONES.scan}Relancer la lecture automatique`;
   };
   const marquer = (id, etatC) => { const ch = vue.querySelector('#' + id)?.closest('.champ'); if (!ch) return; ch.classList.remove('ok', 'verif'); ch.classList.add(etatC); const d = vue.querySelector('#d-' + id); if (d) d.innerHTML = etatC === 'ok' ? '<span class="lu-det">détecté</span>' : '<span class="lu-ver">à vérifier</span>'; };
-  const appliquerLecture = (r) => {
+  const appliquerLecture = async (r) => {
     const ch = r.champs || {}; const av = new Set(r.a_verifier || []);
+    // Sens suggéré (en-tête de l'ENA → départ)
+    if (ch.sens_suggere && ch.sens_suggere !== sens) {
+      const b = document.createElement('div'); b.className = 'bandeau ambre'; b.style.marginBottom = '4px';
+      b.innerHTML = `Ce document porte l'en-tête de l'ENA : c'est probablement un courrier <b>${ch.sens_suggere === 'depart' ? 'départ' : 'arrivée'}</b>. <button type="button" class="btn petit" id="bsens" style="margin-left:6px">Basculer en ${ch.sens_suggere === 'depart' ? 'départ' : 'arrivée'}</button>`;
+      vue.querySelector('#ffiche').prepend(b);
+      b.querySelector('#bsens').onclick = () => { sessionStorage.setItem('nexora_lecture', JSON.stringify({ lecture: r, nom: fichier?.name })); naviguer('#/enregistrer/' + ch.sens_suggere); };
+    }
+    // Réponse à un courrier référencé : on cherche l'arrivée correspondante
+    if (ch.reference_liee && vue.querySelector('#lie')) {
+      const t = `%${ch.reference_liee.replace(/\s+/g, '').slice(-12)}%`;
+      const { data: lies } = await sb.from('courriers').select('id,numero_ordre,objet').eq('sens', 'arrivee').ilike('reference_externe', t).limit(3);
+      if (lies?.length) { vue.querySelector('#lie').value = lies[0].id; marquer('lie', 'ok'); }
+    }
+    if (ch.signataire && vue.querySelector('#sign')) { vue.querySelector('#sign').value = ch.signataire + (ch.fonction_signataire ? ` (${ch.fonction_signataire})` : ''); marquer('sign', av.has('sign') ? 'verif' : 'ok'); }
+    if (ch.service_a_creer && !ch.service) { const srvSel = vue.querySelector('#service'); const opt = document.createElement('option'); opt.value = '__nouveau__'; opt.textContent = `Créer : ${ch.service_a_creer}`; opt.dataset.nom = ch.service_a_creer; srvSel.appendChild(opt); srvSel.value = '__nouveau__'; marquer('service', 'verif'); }
     const mettre = (id, val) => { if (val === undefined || val === null || val === '') return; const el = vue.querySelector('#' + id); if (!el) return; el.value = val; marquer(id, av.has(id) ? 'verif' : 'ok'); };
     mettre('contact', ch.contact); mettre('ref', ch.reference); mettre('dcour', ch.date_courrier); mettre('objet', ch.objet); mettre('resume', ch.resume); mettre('action', ch.action_demandee); mettre('echeance', ch.echeance);
     if (ch.urgence && URGENCES[ch.urgence]) mettre('urgence', ch.urgence);
@@ -511,9 +528,11 @@ async function vueEnregistrer(sens) {
       // contact
       let contact_id = null; const { data: cx } = await sb.from('contacts').select('id').ilike('nom', v('contact')).maybeSingle();
       if (cx) contact_id = cx.id; else { const { data: nc } = await sb.from('contacts').insert({ nom: v('contact') }).select('id').single(); contact_id = nc?.id; }
+      let serviceId = v('service');
+      if (serviceId === '__nouveau__') { const o = vue.querySelector('#service option[value="__nouveau__"]'); const nom = o?.dataset.nom || 'Nouveau service'; const code = nom.split(/\s+/).filter((m) => m.length > 2 && !/^(de|la|le|les|des|et|du|l')$/i.test(m)).map((m) => m[0].toUpperCase()).join('').slice(0, 6) || 'SRV'; const { data: ns, error: es } = await sb.from('services').insert({ code: code + '-' + Math.floor(Math.random() * 90 + 10), nom }).select('id').single(); if (es) throw es; serviceId = ns.id; await chargerProfil(); }
       const ligne = {
         sens, statut: statutFinal, contact_id, contact_nom: v('contact'), reference_externe: v('ref'), date_courrier: v('dcour'), date_evenement: v('devt') || aujourdhui(),
-        annee: Number((v('devt') || aujourdhui()).slice(0, 4)), objet: v('objet'), type_id: v('type'), service_id: v('service'), urgence: v('urgence') || 'normal', categorie_id: v('cat'),
+        annee: Number((v('devt') || aujourdhui()).slice(0, 4)), objet: v('objet'), type_id: v('type'), service_id: serviceId, urgence: v('urgence') || 'normal', categorie_id: v('cat'),
         signataire: v('sign'), mode_envoi: v('mode'), courrier_lie_id: v('lie'), echeance: v('echeance'), confidentiel: vue.querySelector('#conf').checked, resume: v('resume'), action_demandee: v('action'),
         observations: v('obs'), cree_par: etat.profil.id, lecture_auto: lecture, lecture_auto_le: lecture ? new Date().toISOString() : null,
       };
@@ -528,7 +547,7 @@ async function vueEnregistrer(sens) {
       }
       // événements détectés
       const cases = [...vue.querySelectorAll('[data-ev]:checked')];
-      for (const cb of cases) { const e = (lecture?.evenements || [])[Number(cb.dataset.ev)]; if (e) await creerEvenement({ courrier_id: c.id, titre: e.titre, type: e.type || 'echeance', debut: e.debut, lieu: e.lieu || null, description: e.description || null }); }
+      for (const cb of cases) { const e = (lecture?.evenements || [])[Number(cb.dataset.ev)]; if (e) await creerEvenement({ courrier_id: c.id, titre: e.titre, type: e.type || 'echeance', debut: e.debut, fin: e.fin || null, lieu: e.lieu || null, description: e.description || null }); }
       if (statutFinal !== 'brouillon' && c.echeance && !cases.length) await creerEvenement({ courrier_id: c.id, titre: `Échéance · ${c.objet}`.slice(0, 120), type: 'echeance', debut: c.echeance + 'T08:00:00' });
       toast(statutFinal === 'brouillon' ? 'Brouillon enregistré.' : `Courrier enregistré sous le n° ${c.numero_ordre}.`);
       naviguer('#/courrier/' + c.id);
@@ -547,7 +566,7 @@ async function apprendre(c) {
 }
 
 async function creerEvenement(e) {
-  const { data: ev, error } = await sb.from('evenements').insert({ ...e, cree_par: etat.profil.id }).select('id,debut').single(); if (error) throw error;
+  const { data: ev, error } = await sb.from('evenements').insert({ ...e, fin: e.fin || null, cree_par: etat.profil.id }).select('id,debut').single(); if (error) throw error;
   const debut = new Date(ev.debut); const rappels = [];
   for (const j of [7, 2, 1]) { const r = ajouterJours(debut, -j); r.setHours(8, 0, 0, 0); if (r > new Date()) rappels.push({ evenement_id: ev.id, declenche_le: r.toISOString(), canal: 'app' }); }
   if (rappels.length) await sb.from('rappels').insert(rappels);
