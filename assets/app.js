@@ -141,7 +141,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-17-004';
+const APP_VERSION = '2026-10-17-005';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -776,29 +776,88 @@ async function genererRapport(type, ref) {
 // ------------------------------------------------------------------
 async function vueParametres() {
   const vue = coque('parametres', '');
-  const p = etat.profil; const admin = p.role === 'admin';
+  const p = etat.profil; const admin = p.role === 'admin'; const gere = peutEcrire();
   let profils = []; if (admin) { const { data } = await sb.from('profils').select('*, services(nom)').order('nom'); profils = data || []; }
+  const [{ data: tousServices }, { data: tousTypes }, { data: toutesCat }] = await Promise.all([
+    sb.from('services').select('*').order('actif', { ascending: false }).order('nom'),
+    sb.from('types_courrier').select('*').order('actif', { ascending: false }).order('nom'),
+    sb.from('categories').select('*').order('actif', { ascending: false }).order('nom'),
+  ]);
+  const SENS = { les_deux: 'Arrivée et départ', arrivee: 'Arrivée', depart: 'Départ' };
+  const ligneRef = (table, x, detail) => `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bord-leger);${x.actif ? '' : 'opacity:.55'}">
+      <div style="flex:1;min-width:0"><div style="font-weight:600">${esc(x.nom)}</div>${detail ? `<div style="font-size:12px;color:var(--muet)">${detail}</div>` : ''}</div>
+      ${gere ? `<button class="ico" data-modif="${table}:${x.id}" aria-label="Modifier ${esc(x.nom)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+      <button class="ico" data-actif="${table}:${x.id}:${x.actif ? 0 : 1}" title="${x.actif ? 'Désactiver' : 'Réactiver'}" aria-label="${x.actif ? 'Désactiver' : 'Réactiver'} ${esc(x.nom)}">${x.actif ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>' : ICONES.ok}</button>` : ''}</div>`;
+
   vue.innerHTML = `
   <header class="entete"><div class="titre"><div class="fil">Compte, référentiels et accès</div><h1>Paramètres</h1></div><div class="actions"><button class="btn" id="bdec">Se déconnecter</button></div></header>
+  <div class="bandeau vert" style="align-self:flex-start">Les directions, services, types de courrier et catégories que vous ajoutez ici alimentent les listes déroulantes de l'enregistrement, les filtres et la recherche.</div>
+  <div class="grille3">
+    <section class="carte"><div class="tete"><h2>Directions et services internes</h2><span class="chip gris">${(tousServices || []).filter((s) => s.actif).length} actifs</span></div>
+      <div>${(tousServices || []).map((s) => ligneRef('services', s, `${esc(s.code)}${s.responsable ? ' · ' + esc(s.responsable) : ''}${s.description ? ' · ' + esc(s.description) : ''}`)).join('')}</div>
+      ${gere ? `<form id="fsrv" class="grille2" style="gap:10px;margin-top:6px"><div class="champ"><label for="scode">Sigle</label><input id="scode" placeholder="DRH" maxlength="12" required></div><div class="champ"><label for="snom">Nom de la direction / du service</label><input id="snom" placeholder="Direction des ressources humaines" required></div><div class="champ"><label for="sresp">Responsable (facultatif)</label><input id="sresp" placeholder="Nom du directeur / chef de service"></div><div class="champ"><label for="sdesc">Description (facultatif)</label><input id="sdesc" placeholder="Rôle, mots-clés…"></div><button class="btn petit principal" type="submit" style="align-self:end">${ICONES.plus}Ajouter</button></form>` : ''}</section>
+    <section class="carte"><div class="tete"><h2>Types de courrier</h2><span class="chip gris">${(tousTypes || []).filter((t) => t.actif).length} actifs</span></div>
+      <div>${(tousTypes || []).map((t) => ligneRef('types_courrier', t, SENS[t.sens])).join('')}</div>
+      ${gere ? `<form id="ftyp" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;align-items:flex-end"><div class="champ" style="flex:1 1 160px"><label for="tnom">Nouveau type</label><input id="tnom" placeholder="Ex. Note circulaire" required></div><div class="champ"><label for="tsens">Sens</label><select id="tsens"><option value="les_deux">Arrivée et départ</option><option value="arrivee">Arrivée</option><option value="depart">Départ</option></select></div><button class="btn petit principal" type="submit">${ICONES.plus}Ajouter</button></form>` : ''}</section>
+    <section class="carte"><div class="tete"><h2>Catégories</h2><span class="chip gris">${(toutesCat || []).filter((k) => k.actif).length} actives</span></div>
+      <div>${(toutesCat || []).map((k) => ligneRef('categories', k, '')).join('')}</div>
+      ${gere ? `<form id="fcat" style="display:flex;gap:8px;margin-top:6px;align-items:flex-end"><div class="champ" style="flex:1"><label for="knom">Nouvelle catégorie</label><input id="knom" placeholder="Ex. Scolarité" required></div><button class="btn petit principal" type="submit">${ICONES.plus}Ajouter</button></form>` : ''}
+      <div style="font-size:12px;color:var(--muet)">Un élément désactivé disparaît des listes mais reste sur les courriers déjà enregistrés.</div></section>
+  </div>
   <div class="grille3">
     <section class="carte"><h2>Mon compte</h2>
       <form id="fnom" class="champ"><label for="pnom">Nom affiché</label><input id="pnom" value="${esc(p.nom)}"><button class="btn petit" type="submit" style="align-self:flex-start;margin-top:4px">Enregistrer</button></form>
       <div class="fiche"><dt>Email</dt><dd>${esc(p.email || etat.session.user.email)}</dd><dt>Rôle</dt><dd>${ROLES[p.role]}</dd></div>
       <form id="fmdp" style="display:flex;flex-direction:column;gap:10px"><h2 style="font-size:14px">Changer le mot de passe</h2><div class="champ"><label for="n1">Nouveau mot de passe</label><input id="n1" type="password" minlength="8" required></div><div class="champ"><label for="n2">Confirmer</label><input id="n2" type="password" minlength="8" required></div><button class="btn petit" type="submit" style="align-self:flex-start">Mettre à jour</button></form>
     </section>
-    <section class="carte"><h2>Services</h2>${etat.services.map((s) => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bord-leger)"><span>${esc(s.nom)}</span><span class="chip gris">${esc(s.code)}</span></div>`).join('')}
-      ${admin ? `<form id="fsrv" style="display:flex;gap:8px;margin-top:6px"><input class="recherche" id="scode" placeholder="Code" style="width:80px" required><input class="recherche" id="snom" placeholder="Nom du service" style="flex:1" required><button class="btn petit" type="submit">Ajouter</button></form>` : ''}</section>
-    <section class="carte"><h2>Types de courrier</h2><div style="display:flex;flex-wrap:wrap;gap:6px">${etat.types.map((t) => `<span class="chip ${t.sens === 'arrivee' ? 'vert' : t.sens === 'depart' ? 'corail' : 'gris'}">${esc(t.nom)}</span>`).join('')}</div>
-      <h2 style="margin-top:8px">Catégories</h2><div style="display:flex;flex-wrap:wrap;gap:6px">${etat.categories.map((k) => `<span class="chip gris">${esc(k.nom)}</span>`).join('')}</div>
-      ${admin ? `<form id="ftyp" style="display:flex;gap:8px;margin-top:6px"><input class="recherche" id="tnom" placeholder="Nouveau type" style="flex:1" required><select class="filtre-select" id="tsens"><option value="les_deux">Les deux</option><option value="arrivee">Arrivée</option><option value="depart">Départ</option></select><button class="btn petit" type="submit">Ajouter</button></form>` : '<div style="font-size:12px;color:var(--muet)">Modifiables par un administrateur.</div>'}</section>
-  </div>
-  ${admin ? `<section class="carte plein"><div class="tete"><h2>Utilisateurs</h2></div><div class="defile"><table><thead><tr><th>Nom</th><th>Email</th><th>Rôle</th><th>Service</th><th>Actif</th></tr></thead><tbody>${profils.map((u) => `<tr><td>${esc(u.nom)}</td><td>${esc(u.email || '')}</td><td>${ROLES[u.role]}</td><td>${esc(u.services?.nom || '—')}</td><td>${u.actif ? '<span class="chip vert">Oui</span>' : '<span class="chip gris">Non</span>'}</td></tr>`).join('')}</tbody></table></div><div class="pied">Les nouveaux comptes sont créés par l'administrateur technique (Supabase), puis rattachés ici.</div></section>` : ''}`;
+    ${admin ? `<section class="carte plein span2"><div class="tete"><h2>Utilisateurs</h2></div><div class="defile"><table><thead><tr><th>Nom</th><th>Email</th><th>Rôle</th><th>Service</th><th>Actif</th></tr></thead><tbody>${profils.map((u) => `<tr><td>${esc(u.nom)}</td><td>${esc(u.email || '')}</td><td>${ROLES[u.role]}</td><td>${esc(u.services?.nom || '—')}</td><td>${u.actif ? '<span class="chip vert">Oui</span>' : '<span class="chip gris">Non</span>'}</td></tr>`).join('')}</tbody></table></div><div class="pied">Les nouveaux comptes sont créés par l'administrateur technique, puis rattachés ici.</div></section>` : `<section class="carte span2"><h2>Accès</h2><div style="font-size:13px;color:var(--muet)">Une seule utilisatrice pour l'instant. Les accès pour la direction et les autres services seront ouverts dans une prochaine étape : la base est déjà prête (rôles secrétaire, responsable, direction, administrateur).</div></section>`}
+  </div>`;
+
   vue.querySelector('#bdec').onclick = () => sb.auth.signOut();
   vue.querySelector('#fnom').onsubmit = async (e) => { e.preventDefault(); const nom = vue.querySelector('#pnom').value.trim(); if (!nom) return; const { error } = await sb.from('profils').update({ nom }).eq('id', p.id); if (error) return toast(error.message, true); etat.profil.nom = nom; toast('Nom enregistré.'); router(); };
   vue.querySelector('#fmdp').onsubmit = async (e) => { e.preventDefault(); if (vue.querySelector('#n1').value !== vue.querySelector('#n2').value) return toast('Les deux mots de passe diffèrent.', true); const { error } = await sb.auth.updateUser({ password: vue.querySelector('#n1').value }); if (error) return toast(error.message, true); toast('Mot de passe mis à jour.'); e.target.reset(); };
-  vue.querySelector('#fsrv')?.addEventListener('submit', async (e) => { e.preventDefault(); const { error } = await sb.from('services').insert({ code: vue.querySelector('#scode').value.trim().toUpperCase(), nom: vue.querySelector('#snom').value.trim() }); if (error) return toast(error.message, true); await chargerProfil(); router(); });
-  vue.querySelector('#ftyp')?.addEventListener('submit', async (e) => { e.preventDefault(); const { error } = await sb.from('types_courrier').insert({ nom: vue.querySelector('#tnom').value.trim(), sens: vue.querySelector('#tsens').value }); if (error) return toast(error.message, true); await chargerProfil(); router(); });
+  const apres = async (msg) => { await chargerProfil(); toast(msg); router(); };
+  vue.querySelector('#fsrv')?.addEventListener('submit', async (e) => { e.preventDefault(); const { error } = await sb.from('services').insert({ code: vue.querySelector('#scode').value.trim().toUpperCase(), nom: vue.querySelector('#snom').value.trim(), responsable: vue.querySelector('#sresp').value.trim() || null, description: vue.querySelector('#sdesc').value.trim() || null }); if (error) return toast(error.message.includes('duplicate') ? 'Ce sigle existe déjà.' : error.message, true); apres('Direction / service ajouté.'); });
+  vue.querySelector('#ftyp')?.addEventListener('submit', async (e) => { e.preventDefault(); const { error } = await sb.from('types_courrier').insert({ nom: vue.querySelector('#tnom').value.trim(), sens: vue.querySelector('#tsens').value }); if (error) return toast(error.message.includes('duplicate') ? 'Ce type existe déjà.' : error.message, true); apres('Type de courrier ajouté.'); });
+  vue.querySelector('#fcat')?.addEventListener('submit', async (e) => { e.preventDefault(); const { error } = await sb.from('categories').insert({ nom: vue.querySelector('#knom').value.trim() }); if (error) return toast(error.message.includes('duplicate') ? 'Cette catégorie existe déjà.' : error.message, true); apres('Catégorie ajoutée.'); });
+  vue.querySelectorAll('[data-actif]').forEach((b) => b.onclick = async () => { const [table, id, actif] = b.dataset.actif.split(':'); const { error } = await sb.from(table).update({ actif: actif === '1' }).eq('id', id); if (error) return toast(error.message, true); apres(actif === '1' ? 'Réactivé.' : 'Désactivé.'); });
+  vue.querySelectorAll('[data-modif]').forEach((b) => b.onclick = () => {
+    const [table, id] = b.dataset.modif.split(':'); const x = (table === 'services' ? tousServices : table === 'types_courrier' ? tousTypes : toutesCat).find((y) => y.id === id); if (!x) return;
+    const m = modale(`<h2>Modifier</h2>
+      ${table === 'services' ? `<div class="grille2"><div class="champ"><label for="mcode">Sigle</label><input id="mcode" value="${esc(x.code)}" maxlength="12"></div><div class="champ"><label for="mnom">Nom</label><input id="mnom" value="${esc(x.nom)}"></div><div class="champ"><label for="mresp">Responsable</label><input id="mresp" value="${esc(x.responsable || '')}"></div><div class="champ"><label for="mdesc">Description</label><input id="mdesc" value="${esc(x.description || '')}"></div></div>` : ''}
+      ${table === 'types_courrier' ? `<div class="grille2"><div class="champ"><label for="mnom">Nom</label><input id="mnom" value="${esc(x.nom)}"></div><div class="champ"><label for="msens">Sens</label><select id="msens">${Object.entries(SENS).map(([k, l]) => `<option value="${k}" ${x.sens === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>` : ''}
+      ${table === 'categories' ? `<div class="champ"><label for="mnom">Nom</label><input id="mnom" value="${esc(x.nom)}"></div>` : ''}
+      <div class="ligne-boutons"><button class="btn" id="mnon">Retour</button><button class="btn principal" id="moui">Enregistrer</button></div>`);
+    m.querySelector('#mnon').onclick = () => m.remove();
+    m.querySelector('#moui').onclick = async () => {
+      const v = (id2) => m.querySelector('#' + id2)?.value?.trim();
+      const maj = table === 'services' ? { code: v('mcode').toUpperCase(), nom: v('mnom'), responsable: v('mresp') || null, description: v('mdesc') || null } : table === 'types_courrier' ? { nom: v('mnom'), sens: v('msens') } : { nom: v('mnom') };
+      if (!maj.nom) return toast('Le nom est obligatoire.', true);
+      const { error } = await sb.from(table).update(maj).eq('id', id); if (error) return toast(error.message, true); m.remove(); apres('Modifié.');
+    };
+  });
 }
+
+// ------------------------------------------------------------------
+// Mise à jour de l'application (bannière)
+// ------------------------------------------------------------------
+async function verifierMiseAJour() {
+  try {
+    const r = await fetch(`assets/version.json?t=${Date.now()}`, { cache: 'no-store' }); if (!r.ok) return;
+    const { version } = await r.json();
+    if (version && version !== APP_VERSION && !document.getElementById('maj-banniere')) {
+      const b = document.createElement('div'); b.id = 'maj-banniere';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:60;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:10px 16px;background:#8C2F1F;color:#fff;font-size:14px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.2)';
+      b.innerHTML = `<span>Une nouvelle version de NEXORA est disponible (v${esc(version)}).</span><button type="button" id="maj-btn" style="height:36px;padding:0 14px;border-radius:8px;border:none;background:#fff;color:#8C2F1F;font:inherit;font-weight:700;cursor:pointer">Mettre à jour maintenant</button><button type="button" id="maj-plus-tard" style="height:36px;padding:0 10px;border-radius:8px;border:1px solid rgba(255,255,255,.5);background:none;color:#fff;font:inherit;cursor:pointer">Plus tard</button>`;
+      document.body.appendChild(b);
+      b.querySelector('#maj-btn').onclick = () => { location.replace(`${location.pathname}?maj=${Date.now()}${location.hash}`); };
+      b.querySelector('#maj-plus-tard').onclick = () => b.remove();
+    }
+  } catch (e) { /* hors ligne : on réessaiera */ }
+}
+setInterval(verifierMiseAJour, 2 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) verifierMiseAJour(); });
+setTimeout(verifierMiseAJour, 4000);
 
 // ------------------------------------------------------------------
 // Démarrage
