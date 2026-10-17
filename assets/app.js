@@ -141,18 +141,19 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-17-005';
+const APP_VERSION = '2026-10-17-006';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
   const email = etat.session?.user?.email || '';
   app.innerHTML = `
   <div class="coque">
-    <nav class="menu" aria-label="Navigation principale">
+    <nav class="menu${localStorage.getItem('nexora_menu') === 'replie' ? ' replie' : ''}" id="menu" aria-label="Navigation principale">
       <div class="sb-marque"><div class="logo-badge"><img src="assets/ena.jpeg" alt="ENA Côte d'Ivoire"></div><div><div class="brand-name">ENA</div><div class="sb-sous">École nationale d'administration · Côte d'Ivoire</div></div></div>
       ${PAGES.map(([h, l, i]) => `<a class="nav ${active === i ? 'on' : ''}" href="${h}">${ICONES[i]}${l}</a>`).join('')}
       <div class="espace"></div>
       <a class="nav ${active === 'parametres' ? 'on' : ''}" href="#/parametres">${ICONES.parametres}Paramètres</a>
+      <button type="button" class="sb-replier" id="sb-replier" title="Replier / déplier le menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><span>Replier le menu</span></button>
       <div class="util"><div class="avatar" aria-hidden="true">${initiales(p.nom)}</div><div><div class="nom">${esc(p.nom || '')}</div><div class="role">${ROLES[p.role] || ''}</div></div></div>
     </nav>
     <main class="contenu">
@@ -176,6 +177,7 @@ function coque(active, contenu) {
 
 function brancherBarre() {
   const fermer = () => document.querySelectorAll('.tb-menu').forEach((m) => m.remove());
+  document.getElementById('sb-replier').onclick = () => { const m = document.getElementById('menu'); m.classList.toggle('replie'); localStorage.setItem('nexora_menu', m.classList.contains('replie') ? 'replie' : 'ouvert'); };
   document.getElementById('tb-rech').onclick = () => ouvrirRecherche();
   document.getElementById('tb-user').onclick = (e) => {
     e.stopPropagation(); const deja = document.querySelector('#tb-user-zone .tb-menu'); fermer(); if (deja) return;

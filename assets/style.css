@@ -20,7 +20,18 @@ h2{margin:0;font-size:16px;font-weight:600}
 
 /* ---------- Coque ---------- */
 .coque{display:flex;flex-wrap:wrap;min-height:100vh}
-.menu{width:248px;background:var(--vert-fonce);color:#fff;padding:28px 18px;display:flex;flex-direction:column;gap:6px}
+.menu{width:248px;flex-shrink:0;background:linear-gradient(180deg,var(--vert-fonce) 0%,#17522C 100%);color:#fff;padding:22px 14px 16px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh;overflow-y:auto;box-shadow:inset -1px 0 0 rgba(255,255,255,.06);transition:width .18s ease}
+.menu::-webkit-scrollbar{width:6px}.menu::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+.sb-replier{margin-top:8px;display:flex;align-items:center;justify-content:center;gap:8px;height:36px;border:1px solid rgba(255,255,255,.18);border-radius:10px;background:none;color:#D8E8DA;font-size:12px;cursor:pointer}
+.sb-replier:hover{background:rgba(255,255,255,.08);color:#fff}
+.sb-replier svg{width:16px;height:16px}
+.menu.replie{width:86px;padding:18px 8px 12px}
+.menu.replie .sb-marque{flex-direction:column;gap:6px;padding:2px 0 12px;text-align:center}
+.menu.replie .sb-marque .sb-sous,.menu.replie .util .nom,.menu.replie .util .role,.menu.replie .sb-replier span{display:none}
+.menu.replie .sb-marque .brand-name{font-size:11px}
+.menu.replie .nav{flex-direction:column;justify-content:center;gap:5px;padding:9px 2px 8px;font-size:9.5px;text-align:center;line-height:1.2}
+.menu.replie .util{justify-content:center;padding-left:0;padding-right:0}
+.menu.replie .sb-replier svg{transform:rotate(180deg)}
 .sb-marque{display:flex;align-items:center;gap:12px;padding:2px 6px 16px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,.14)}
 .logo-badge{width:52px;height:52px;flex:none;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 0 0 4px rgba(255,255,255,.1),0 6px 18px rgba(0,0,0,.22)}
 .logo-badge img{width:44px;height:44px;object-fit:contain}
@@ -70,7 +81,7 @@ h2{margin:0;font-size:16px;font-weight:600}
 .util .nom{font-size:13px;font-weight:600;color:#fff}
 .util .role{font-size:11px;color:#BFE0BF}
 .contenu{flex:999 1 560px;min-width:0;padding:28px 36px 40px;display:flex;flex-direction:column;gap:20px}
-@media (max-width:720px){.contenu{padding:20px 16px 32px}.menu{width:100%}}
+@media (max-width:720px){.contenu{padding:20px 16px 32px}.menu,.menu.replie{width:100%;position:static;height:auto}.sb-replier{display:none}}
 
 /* ---------- En-tête de page ---------- */
 .entete{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
