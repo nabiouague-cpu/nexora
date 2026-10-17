@@ -44,7 +44,7 @@ const numero = (c) => `<span class="num ${c.sens === 'depart' ? 'dep' : ''}">${e
 let toastTimer;
 function toast(msg, erreur = false) {
   document.querySelectorAll('.toast').forEach((t) => t.remove());
-  const t = document.createElement('div'); t.className = 'toast' + (erreur ? ' erreur' : ''); t.textContent = msg; document.body.appendChild(t);
+  const t = document.createElement('div'); t.className = 'toast' + (erreur ? ' erreur' : ''); t.innerHTML = `<span class="toast-ic">${erreur ? '!' : '✓'}</span><span class="toast-msg">${esc(msg)}</span><span class="toast-barre"></span>`; document.body.appendChild(t);
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), erreur ? 6000 : 3500);
 }
 
@@ -141,7 +141,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-17-006';
+const APP_VERSION = '2026-10-17-007';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -168,7 +168,7 @@ function coque(active, contenu) {
         <div class="marque"><div>${LOGO('#1F6B3A', 200)}<p>${SOUS_TITRES[active] || 'Gestion du courrier et des documents du secrétariat'}</p></div></div>
         <div class="hero-chips" id="hero-chips"><span class="hero-chip"><i></i>${ROLES[p.role] || ''}</span><span class="hero-chip"><i class="corail"></i>${esc(dateLongue(new Date()))}</span></div>
       </div>
-      <div id="vue" style="display:flex;flex-direction:column;gap:20px">${contenu}</div>
+      <div id="vue" class="anim-entree" style="display:flex;flex-direction:column;gap:18px">${contenu}</div>
     </main>
   </div>`;
   brancherBarre();
@@ -262,7 +262,7 @@ window.addEventListener('hashchange', router);
 // Tableau de bord
 // ------------------------------------------------------------------
 async function vueTableau() {
-  const vue = coque('tableau', `<div class="chargement">Chargement…</div>`);
+  const vue = coque('tableau', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
   const auj = aujourdhui(); const d7 = iso(ajouterJours(new Date(), -6)); const d8 = iso(ajouterJours(new Date(), 7));
   const [jour, attente, retard, echeances, sept, evs] = await Promise.all([
     sb.from('v_courriers').select('*').eq('date_evenement', auj).neq('statut', 'brouillon').order('cree_le', { ascending: false }),
@@ -340,7 +340,7 @@ const filtres = { periode: 'semaine', q: '', type: '', statut: '', page: 0 };
 async function vueRegistre(sens) {
   const estArr = sens === 'arrivee';
   const q0 = sessionStorage.getItem('nexora_q'); if (q0 !== null) { filtres.q = q0; filtres.periode = 'tout'; filtres.page = 0; sessionStorage.removeItem('nexora_q'); }
-  const vue = coque(estArr ? 'arrivees' : 'departs', `<div class="chargement">Chargement…</div>`);
+  const vue = coque(estArr ? 'arrivees' : 'departs', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
   const annee = new Date().getFullYear();
   const total = await sb.from('courriers').select('id', { count: 'exact', head: true }).eq('sens', sens).eq('annee', annee).neq('statut', 'brouillon');
 
@@ -546,7 +546,7 @@ async function creerEvenement(e) {
 // Fiche d'un courrier
 // ------------------------------------------------------------------
 async function vueCourrier(id) {
-  const vue = coque('arrivees', `<div class="chargement">Chargement…</div>`);
+  const vue = coque('arrivees', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
   const [{ data: c }, { data: pjs }, { data: trs }, { data: evs }] = await Promise.all([
     sb.from('v_courriers').select('*').eq('id', id).maybeSingle(),
     sb.from('pieces_jointes').select('*').eq('courrier_id', id).order('cree_le'),
@@ -563,7 +563,7 @@ async function vueCourrier(id) {
 
   vue.innerHTML = `
   <header class="entete"><div class="titre"><div class="fil"><a href="#/${estArr ? 'arrivees' : 'departs'}" style="text-decoration:none">${estArr ? 'Arrivées' : 'Départs'}</a> · ${c.numero_ordre || 'Brouillon'}</div><h1 style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">${esc(c.numero_ordre || 'Brouillon')} ${chipStatut(c)}${c.confidentiel ? '<span class="chip corail">Confidentiel</span>' : ''}</h1><div style="font-size:15px;margin-top:4px">${esc(c.objet)}</div></div>
-    <div class="actions">${peutEcrire() && c.statut !== 'annule' ? `${c.statut === 'brouillon' ? `<button class="btn principal" id="bvalider">Valider et attribuer le n°</button>` : `<select id="sstatut" class="filtre-select" style="height:44px" aria-label="Changer le statut">${statutsPossibles.map((s) => `<option value="${s}" ${c.statut === s ? 'selected' : ''}>${STATUTS[s][0]}</option>`).join('')}</select>`}
+    <div class="actions">${peutEcrire() && c.statut !== 'annule' ? `${c.statut === 'brouillon' ? `<button class="btn principal" id="bvalider">Valider et attribuer le n°</button>` : `<select id="sstatut" class="filtre-select" aria-label="Changer le statut">${statutsPossibles.map((s) => `<option value="${s}" ${c.statut === s ? 'selected' : ''}>${STATUTS[s][0]}</option>`).join('')}</select>`}
       ${estArr && c.statut !== 'brouillon' ? `<a class="btn vert" href="#/enregistrer/depart">Répondre (départ)</a>` : ''}<button class="btn danger" id="bannuler">Annuler</button>` : ''}</div></header>
   <div class="grille3">
     <section class="carte span2">
@@ -643,7 +643,7 @@ function modaleEvenement(pre = {}, apres) {
 // Agenda et alertes
 // ------------------------------------------------------------------
 async function vueAgenda(dateParam) {
-  const vue = coque('agenda', `<div class="chargement">Chargement…</div>`);
+  const vue = coque('agenda', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
   const ref = dateParam ? new Date(dateParam) : new Date(); const lundi = lundiDe(ref); const dim = ajouterJours(lundi, 6);
   const [{ data: evs }, { data: rappels }] = await Promise.all([
     sb.from('evenements').select('*, courriers(numero_ordre)').gte('debut', lundi.toISOString()).lt('debut', ajouterJours(lundi, 7).toISOString()).neq('statut', 'annule').order('debut'),
@@ -679,7 +679,7 @@ const localISO = (s) => { const d = new Date(s); return `${iso(d)}T${pad(d.getHo
 // Archives
 // ------------------------------------------------------------------
 async function vueArchives() {
-  const vue = coque('archives', `<div class="chargement">Chargement…</div>`);
+  const vue = coque('archives', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
   const { data: annees } = await sb.from('courriers').select('annee').neq('statut', 'brouillon').order('annee', { ascending: false });
   const listeAnnees = [...new Set((annees || []).map((a) => a.annee))]; if (!listeAnnees.length) listeAnnees.push(new Date().getFullYear());
   const sel = { annee: listeAnnees[0], mois: '', sens: '' };
@@ -720,14 +720,14 @@ function bornes(type, ref = new Date()) {
 }
 
 async function vueRapports() {
-  const vue = coque('rapports', `<div class="chargement">Chargement…</div>`);
+  const vue = coque('rapports', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
   const { data: recents } = await sb.from('rapports').select('*').order('genere_le', { ascending: false }).limit(12);
   const liens = await Promise.all((recents || []).map(async (r) => { if (!r.chemin_storage) return r; const { data } = await sb.storage.from('rapports').createSignedUrl(r.chemin_storage, 3600); return { ...r, url: data?.signedUrl }; }));
   const TYPES = [['jour', 'Rapport du jour', 'Courriers reçus et envoyés, transmissions, courriers en attente.'], ['semaine', 'Rapport hebdomadaire', 'Synthèse de la semaine, délais, retards, échéances à venir.'], ['mois', 'Rapport mensuel', 'Statistiques par type et par service, liste complète du mois.'], ['annee', 'Rapport annuel', "Bilan de l'année, tendances mois par mois, liste complète."]];
   const LIB = { jour: 'Journalier', semaine: 'Hebdomadaire', mois: 'Mensuel', trimestre: 'Trimestriel', annee: 'Annuel' };
   vue.innerHTML = `
   <header class="entete"><div class="titre"><div class="fil">Rapports d'activité générés à partir du registre</div><h1>Rapports</h1></div>
-    <div class="actions"><label for="rdate" style="font-size:13px;color:var(--muet)">Date de référence</label><input id="rdate" type="date" class="recherche" value="${aujourdhui()}" style="height:44px"></div></header>
+    <div class="actions"><label for="rdate" style="font-size:13px;color:var(--muet)">Date de référence</label><input id="rdate" type="date" class="recherche" value="${aujourdhui()}"></div></header>
   <section class="grille4">${TYPES.map(([t, l, d]) => `<div class="carte rc"><h2>${l}</h2><p>${d}</p><div class="bas"><button class="btn petit principal" data-pdf="${t}">${ICONES.telecharger}Générer le PDF</button>${t === 'annee' ? `<button class="btn petit" data-xlsx="annee">Registre Excel</button>` : ''}</div></div>`).join('')}</section>
   <section class="carte plein"><div class="tete"><h2>Rapports générés</h2></div><div class="defile">${liens.length ? `<table><thead><tr><th>Rapport</th><th>Période</th><th>Généré le</th><th><span class="sr">Télécharger</span></th></tr></thead><tbody>${liens.map((r) => `<tr><td style="font-weight:600">${LIB[r.type]}</td><td>${fmtDate(r.periode_debut)} – ${fmtDate(r.periode_fin)}</td><td>${fmtDateHeure(r.genere_le)}</td><td>${r.url ? `<a class="ico" href="${r.url}" target="_blank" rel="noopener" aria-label="Télécharger">${ICONES.telecharger}</a>` : '—'}</td></tr>`).join('')}</tbody></table>` : `<div class="vide">Aucun rapport généré pour l'instant.</div>`}</div></section>`;
   vue.querySelectorAll('[data-pdf]').forEach((b) => b.onclick = async () => { b.disabled = true; try { await genererRapport(b.dataset.pdf, new Date(vue.querySelector('#rdate').value || aujourdhui())); router(); } catch (e) { console.error(e); toast('Génération impossible : ' + e.message, true); b.disabled = false; } });
