@@ -72,7 +72,18 @@ const ICONES = {
   scan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M3 12h18"/></svg>',
 };
 
-const LOGO = (couleur = '#FFFFFF', largeur = 186) => `<svg viewBox="-60 -48 660 224" width="${largeur}" height="${Math.round(largeur * 224 / 660)}" role="img" aria-label="NEXORA"><g fill="none" stroke="${couleur}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"><path d="M0 112 V12 L60 112 V12"/><path d="M128 12 H96 V112 H128 M96 62 H122"/><path d="M224 12 L164 112"/><circle cx="307" cy="62" r="47"/><path d="M390 112 V12 H422 a26 26 0 0 1 0 52 H390"/><path d="M416 64 L444 112"/><path d="M480 112 L510 12 L540 112 M492 72 H528"/></g><path d="M-40 -24 H90 Q142 -24 164 12 L224 112 Q246 148 300 148 H580" fill="none" stroke="#E8705C" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="180 1000" stroke-dashoffset="180"><animate attributeName="stroke-dashoffset" values="180;-700;-700" keyTimes="0;0.85;1" dur="2.2s" repeatCount="indefinite"/></path></svg>`;
+// Signature au trait NEXORA (même construction qu'ORIGEN) : lettres, lumière qui parcourt, trait corail qui traverse le X.
+let wmCompteur = 0;
+const LETTRES_NEXORA = '<path d="M0 112 V12 L60 112 V12"/><path d="M128 12 H96 V112 H128 M96 62 H122"/><path d="M224 12 L164 112"/><circle cx="307" cy="62" r="47"/><path d="M390 112 V12 H422 a26 26 0 0 1 0 52 H390"/><path d="M416 64 L444 112"/><path d="M480 112 L510 12 L540 112 M492 72 H528"/>';
+const TRAIT_NEXORA = 'M-40 -24 H90 Q142 -24 164 12 L224 112 Q246 148 300 148 H580';
+function wordmarkNexora(theme = 'clair', largeur) {
+  const id = 'wmnx' + (++wmCompteur);
+  return `<svg class="wm wm-sig wm-${theme === 'sombre' ? 'sombre' : 'clair'}" viewBox="-60 -48 660 224" role="img" aria-label="NEXORA"${largeur ? ` width="${largeur}" height="${Math.round(largeur * 224 / 660)}"` : ''}><defs><g id="${id}">${LETTRES_NEXORA}</g></defs><use href="#${id}" class="sig"></use><use href="#${id}" class="sig-light"></use><path class="sig-trait" d="${TRAIT_NEXORA}"><animate attributeName="stroke-dashoffset" values="180;-700;-700" keyTimes="0;0.85;1" dur="2.2s" repeatCount="indefinite"/></path></svg>`;
+}
+const LOGO = (couleur = '#FFFFFF', largeur = 186) => wordmarkNexora(couleur === '#FFFFFF' ? 'sombre' : 'clair', largeur);
+function ecranChargement(texte) {
+  return `<div class="loading v2"><div class="loading-nom">${wordmarkNexora('clair')}</div><div class="loading-txt">${esc(texte)}</div><div class="loading-barre"><i></i></div><div class="loading-squelette" aria-hidden="true"><div></div><div></div><div></div></div></div>`;
+}
 
 const initiales = (nom) => (nom || 'N').split(/\s+/).map((m) => m[0]).join('').slice(0, 2).toUpperCase();
 const ROLES = { secretaire: 'Secrétaire de direction', responsable: 'Responsable de service', direction: 'Direction', admin: 'Administrateur' };
@@ -141,7 +152,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-17-009';
+const APP_VERSION = '2026-10-17-010';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -262,7 +273,7 @@ window.addEventListener('hashchange', router);
 // Tableau de bord
 // ------------------------------------------------------------------
 async function vueTableau() {
-  const vue = coque('tableau', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
+  const vue = coque('tableau', ecranChargement('Chargement des données…'));
   const auj = aujourdhui(); const d7 = iso(ajouterJours(new Date(), -6)); const d8 = iso(ajouterJours(new Date(), 7));
   const [jour, attente, retard, echeances, sept, evs] = await Promise.all([
     sb.from('v_courriers').select('*').eq('date_evenement', auj).neq('statut', 'brouillon').order('cree_le', { ascending: false }),
@@ -340,7 +351,7 @@ const filtres = { periode: 'semaine', q: '', type: '', statut: '', page: 0 };
 async function vueRegistre(sens) {
   const estArr = sens === 'arrivee';
   const q0 = sessionStorage.getItem('nexora_q'); if (q0 !== null) { filtres.q = q0; filtres.periode = 'tout'; filtres.page = 0; sessionStorage.removeItem('nexora_q'); }
-  const vue = coque(estArr ? 'arrivees' : 'departs', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
+  const vue = coque(estArr ? 'arrivees' : 'departs', ecranChargement('Chargement des données…'));
   const annee = new Date().getFullYear();
   const total = await sb.from('courriers').select('id', { count: 'exact', head: true }).eq('sens', sens).eq('annee', annee).neq('statut', 'brouillon');
 
@@ -577,7 +588,7 @@ async function creerEvenement(e) {
 // Fiche d'un courrier
 // ------------------------------------------------------------------
 async function vueCourrier(id) {
-  const vue = coque('arrivees', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
+  const vue = coque('arrivees', ecranChargement('Chargement des données…'));
   const [{ data: c }, { data: pjs }, { data: trs }, { data: evs }] = await Promise.all([
     sb.from('v_courriers').select('*').eq('id', id).maybeSingle(),
     sb.from('pieces_jointes').select('*').eq('courrier_id', id).order('cree_le'),
@@ -674,7 +685,7 @@ function modaleEvenement(pre = {}, apres) {
 // Agenda et alertes
 // ------------------------------------------------------------------
 async function vueAgenda(dateParam) {
-  const vue = coque('agenda', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
+  const vue = coque('agenda', ecranChargement('Chargement des données…'));
   const ref = dateParam ? new Date(dateParam) : new Date(); const lundi = lundiDe(ref); const dim = ajouterJours(lundi, 6);
   const [{ data: evs }, { data: rappels }] = await Promise.all([
     sb.from('evenements').select('*, courriers(numero_ordre)').gte('debut', lundi.toISOString()).lt('debut', ajouterJours(lundi, 7).toISOString()).neq('statut', 'annule').order('debut'),
@@ -710,7 +721,7 @@ const localISO = (s) => { const d = new Date(s); return `${iso(d)}T${pad(d.getHo
 // Archives
 // ------------------------------------------------------------------
 async function vueArchives() {
-  const vue = coque('archives', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
+  const vue = coque('archives', ecranChargement('Chargement des données…'));
   const { data: annees } = await sb.from('courriers').select('annee').neq('statut', 'brouillon').order('annee', { ascending: false });
   const listeAnnees = [...new Set((annees || []).map((a) => a.annee))]; if (!listeAnnees.length) listeAnnees.push(new Date().getFullYear());
   const sel = { annee: listeAnnees[0], mois: '', sens: '' };
@@ -751,7 +762,7 @@ function bornes(type, ref = new Date()) {
 }
 
 async function vueRapports() {
-  const vue = coque('rapports', `<div class="loading" style="min-height:0;padding:40px 0"><div class="loading-barre"><i></i></div><div class="loading-squelette"><div></div><div></div><div></div></div></div>`);
+  const vue = coque('rapports', ecranChargement('Chargement des données…'));
   const { data: recents } = await sb.from('rapports').select('*').order('genere_le', { ascending: false }).limit(12);
   const liens = await Promise.all((recents || []).map(async (r) => { if (!r.chemin_storage) return r; const { data } = await sb.storage.from('rapports').createSignedUrl(r.chemin_storage, 3600); return { ...r, url: data?.signedUrl }; }));
   const TYPES = [['jour', 'Rapport du jour', 'Courriers reçus et envoyés, transmissions, courriers en attente.'], ['semaine', 'Rapport hebdomadaire', 'Synthèse de la semaine, délais, retards, échéances à venir.'], ['mois', 'Rapport mensuel', 'Statistiques par type et par service, liste complète du mois.'], ['annee', 'Rapport annuel', "Bilan de l'année, tendances mois par mois, liste complète."]];

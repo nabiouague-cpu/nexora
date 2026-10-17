@@ -322,6 +322,20 @@ a.fichier:hover{background:var(--accent-soft);border-color:var(--accent-line)}
 .toast.erreur .toast-barre{animation-duration:6s}
 @keyframes toastBarre{from{width:100%}to{width:0}}
 
+/* ---- Marque (signature au trait, même mécanique qu'ORIGEN) ---- */
+.wm-sig .sig{fill:none;stroke-width:16;stroke-linecap:round;stroke-linejoin:round}
+.wm-sig .sig-light{fill:none;stroke-width:16;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:120 1600;stroke-dashoffset:1720;animation:sigRun 4.2s linear infinite}
+.wm-sig .sig-trait{fill:none;stroke:var(--gold);stroke-width:16;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:180 1000;stroke-dashoffset:180}
+.wm-sig.wm-clair .sig{stroke:var(--teal)}.wm-sig.wm-clair .sig-light{stroke:#5FBE6A;filter:drop-shadow(0 0 3px rgba(95,190,106,.85))}
+.wm-sig.wm-sombre .sig{stroke:#fff}.wm-sig.wm-sombre .sig-light{stroke:#9FE3A6;filter:drop-shadow(0 0 4px rgba(159,227,166,.9))}
+@keyframes sigRun{to{stroke-dashoffset:0}}
+.hero .marque .wm{height:44px;width:auto}
+.carte-connexion .logo .wm{height:64px;width:auto}
+.loading-nom .wm{height:clamp(84px,14vw,130px);width:auto;max-width:90vw;margin:4px auto 10px}
+.loading-txt{font-size:13px;color:var(--ink-soft)}
+.loading.v2{min-height:0;padding:40px 0}
+#app>.loading{min-height:100vh}
+
 /* ---- Chargement ---- */
 .loading{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--ink-soft);gap:4px;padding:28px 0}
 .loading-nom{font-size:30px;font-weight:700;letter-spacing:.06em;color:var(--ink)}
