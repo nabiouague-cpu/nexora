@@ -154,7 +154,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-021';
+const APP_VERSION = '2026-10-18-022';
 const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
@@ -240,7 +240,7 @@ function ouvrirRecherche() {
   let t; const chercher = async () => {
     const q = inp.value.trim(); if (q.length < 2) { m.querySelector('#rg-res').innerHTML = ''; return; }
     const tt = `%${q.replace(/[%_,]/g, '')}%`;
-    const { data } = await sb.from('v_courriers').select('id,numero_ordre,sens,objet,contact_nom,date_evenement,statut,echeance').neq('statut', 'brouillon').or(`objet.ilike.${tt},contact_nom.ilike.${tt},numero_ordre.ilike.${tt},reference_externe.ilike.${tt},resume.ilike.${tt}`).order('date_evenement', { ascending: false }).limit(15);
+    const { data } = await sb.from('v_courriers').select('id,numero_ordre,sens,objet,contact_nom,date_evenement,statut,echeance').not('statut', 'in', '(brouillon,annule)').or(`objet.ilike.${tt},contact_nom.ilike.${tt},numero_ordre.ilike.${tt},reference_externe.ilike.${tt},resume.ilike.${tt}`).order('date_evenement', { ascending: false }).limit(15);
     m.querySelector('#rg-res').innerHTML = (data || []).length ? data.map((c) => `<a href="#/courrier/${c.id}" class="tb-notif-item" style="border:1px solid var(--bord-leger)">${numero(c)}<span style="flex:1;min-width:0"><b>${esc(c.objet)}</b><small>${esc(c.contact_nom)} · ${fmtDate(c.date_evenement)}</small></span>${chipStatut(c)}</a>`).join('') : `<div class="tb-notif-vide">Aucun résultat.</div>`;
     m.querySelectorAll('a').forEach((a) => a.onclick = () => m.remove());
   };
@@ -281,11 +281,11 @@ async function vueTableau() {
   const vue = coque('tableau', ecranChargement('Chargement des données…'));
   const auj = aujourdhui(); const d7 = iso(ajouterJours(new Date(), -6)); const d8 = iso(ajouterJours(new Date(), 7));
   const [jour, attente, retard, echeances, sept, evs] = await Promise.all([
-    sb.from('v_courriers').select('*').eq('date_evenement', auj).neq('statut', 'brouillon').order('cree_le', { ascending: false }),
+    sb.from('v_courriers').select('*').eq('date_evenement', auj).not('statut', 'in', '(brouillon,annule)').order('cree_le', { ascending: false }),
     sb.from('courriers').select('id', { count: 'exact', head: true }).in('statut', ['recu', 'a_traiter', 'transmis']).eq('sens', 'arrivee'),
     sb.from('courriers').select('id', { count: 'exact', head: true }).in('statut', ['recu', 'a_traiter', 'transmis']).lt('echeance', auj),
     sb.from('courriers').select('id', { count: 'exact', head: true }).gte('echeance', auj).lte('echeance', d8).not('statut', 'in', '(traite,classe,annule,brouillon)'),
-    sb.from('courriers').select('sens,date_evenement').gte('date_evenement', d7).lte('date_evenement', auj).neq('statut', 'brouillon'),
+    sb.from('courriers').select('sens,date_evenement').gte('date_evenement', d7).lte('date_evenement', auj).not('statut', 'in', '(brouillon,annule)'),
     sb.from('evenements').select('*, courriers(numero_ordre)').gte('debut', new Date(auj).toISOString()).lte('debut', new Date(d8 + 'T23:59:59').toISOString()).eq('statut', 'a_venir').order('debut').limit(6),
   ]);
   const lj = jour.data || [];
@@ -358,7 +358,7 @@ async function vueRegistre(sens) {
   const q0 = sessionStorage.getItem('nexora_q'); if (q0 !== null) { filtres.q = q0; filtres.periode = 'tout'; filtres.page = 0; sessionStorage.removeItem('nexora_q'); }
   const vue = coque(estArr ? 'arrivees' : 'departs', ecranChargement('Chargement des données…'));
   const annee = new Date().getFullYear();
-  const total = await sb.from('courriers').select('id', { count: 'exact', head: true }).eq('sens', sens).eq('annee', annee).neq('statut', 'brouillon');
+  const total = await sb.from('courriers').select('id', { count: 'exact', head: true }).eq('sens', sens).eq('annee', annee).not('statut', 'in', '(brouillon,annule)');
 
   const rendre = async () => {
     const auj = new Date(); let debut = null, fin = null, libelle = '';
@@ -371,7 +371,7 @@ async function vueRegistre(sens) {
     let req = sb.from('v_courriers').select('*', { count: 'exact' }).eq('sens', sens).order('date_evenement', { ascending: false }).order('cree_le', { ascending: false }).range(filtres.page * taille, filtres.page * taille + taille - 1);
     if (debut) req = req.gte('date_evenement', debut).lte('date_evenement', fin);
     if (filtres.type) req = req.eq('type_id', filtres.type);
-    if (filtres.statut) req = req.eq('statut', filtres.statut); else req = req.neq('statut', 'brouillon');
+    if (filtres.statut) req = req.eq('statut', filtres.statut); else req = req.not('statut', 'in', '(brouillon,annule)');
     if (filtres.q) { const t = `%${filtres.q.replace(/[%_]/g, '')}%`; req = req.or(`objet.ilike.${t},contact_nom.ilike.${t},numero_ordre.ilike.${t},reference_externe.ilike.${t},resume.ilike.${t}`); }
     const { data, count, error } = await req; if (error) throw error;
     const liste = data || [];
@@ -398,7 +398,7 @@ async function vueRegistre(sens) {
     vue.querySelector('#pprec').onclick = () => { filtres.page--; rendre(); };
     vue.querySelector('#psuiv').onclick = () => { filtres.page++; rendre(); };
     vue.querySelector('#bexcel').onclick = async () => {
-      let r = sb.from('v_courriers').select('*').eq('sens', sens).neq('statut', 'brouillon').order('date_evenement');
+      let r = sb.from('v_courriers').select('*').eq('sens', sens).not('statut', 'in', '(brouillon,annule)').order('date_evenement');
       if (debut) r = r.gte('date_evenement', debut).lte('date_evenement', fin);
       const { data: tout } = await r;
       exporterExcel(tout || [], `NEXORA_${estArr ? 'arrivees' : 'departs'}_${(libelle || 'tout').replace(/[^\w]+/g, '_')}.xlsx`);
@@ -429,7 +429,7 @@ async function vueEnregistrer(sens, existant = null) {
   const vue = coque(estArr ? 'arrivees' : 'departs', '');
   let fichier = null; let lecture = existant?.lecture_auto || null;
   const opt = (liste, val) => liste.map((x) => `<option value="${x.id}" ${x.id === val ? 'selected' : ''}>${esc(x.nom)}</option>`).join('');
-  const { data: arrivees } = estArr ? { data: [] } : await sb.from('courriers').select('id,numero_ordre,objet').eq('sens', 'arrivee').neq('statut', 'brouillon').order('cree_le', { ascending: false }).limit(200);
+  const { data: arrivees } = estArr ? { data: [] } : await sb.from('courriers').select('id,numero_ordre,objet').eq('sens', 'arrivee').not('statut', 'in', '(brouillon,annule)').order('cree_le', { ascending: false }).limit(200);
 
   vue.innerHTML = `
   <header class="entete"><div class="titre"><div class="fil"><a href="#/${estArr ? 'arrivees' : 'departs'}" style="text-decoration:none">${estArr ? 'Arrivées' : 'Départs'}</a> · ${existant ? 'Modification de ' + esc(existant.numero_ordre || 'brouillon') : 'Nouvel enregistrement'}</div><h1>${existant ? 'Modifier le courrier ' + esc(existant.numero_ordre || '') : 'Enregistrer un courrier ' + (estArr ? 'arrivée' : 'départ')}</h1></div>
@@ -744,7 +744,7 @@ async function vueCourrier(id) {
       </dl>
       ${c.resume ? `<div><div class="fiche"><dt>Résumé</dt></div><div style="padding:10px 12px;background:var(--fond);border-radius:10px">${esc(c.resume)}</div></div>` : ''}
       ${c.observations ? `<div class="fiche"><dt>Observations</dt><dd>${esc(c.observations)}</dd></div>` : ''}
-      ${c.statut === 'annule' ? `<div class="bandeau corail">Annulé le ${fmtDateHeure(c.annule_le)} · ${esc(c.annule_motif)}</div>` : ''}
+      ${c.statut === 'annule' ? `<div class="bandeau corail" style="justify-content:space-between;flex-wrap:wrap">Annulé le ${fmtDateHeure(c.annule_le)} · ${esc(c.annule_motif)} — ce courrier n'apparaît plus dans le registre.${peutEcrire() ? ` <button class="btn petit" id="brestaurer" type="button">Restaurer</button>` : ''}</div>` : ''}
     </section>
     <div style="display:flex;flex-direction:column;gap:20px">
       <section class="carte"><div class="tete"><h2>Scans</h2>${peutEcrire() ? `<label class="btn petit" for="ajpj" style="cursor:pointer">${ICONES.plus}Ajouter</label><input id="ajpj" type="file" class="sr" accept="application/pdf,image/*">` : ''}</div>
@@ -758,10 +758,11 @@ async function vueCourrier(id) {
 
   vue.querySelector('#bvalider')?.addEventListener('click', async () => { const { error } = await sb.from('courriers').update({ statut: estArr ? 'recu' : 'envoye' }).eq('id', id); if (error) return toast(error.message, true); toast('Courrier validé.'); router(); });
   vue.querySelector('#sstatut')?.addEventListener('change', async (e) => { const { error } = await sb.from('courriers').update({ statut: e.target.value }).eq('id', id); if (error) return toast(error.message, true); toast('Statut mis à jour.'); router(); });
+  vue.querySelector('#brestaurer')?.addEventListener('click', async () => { const { error } = await sb.from('courriers').update({ statut: estArr ? 'recu' : 'envoye', annule_motif: null, annule_le: null }).eq('id', id); if (error) return toast(error.message, true); toast('Courrier restauré dans le registre.'); router(); });
   vue.querySelector('#bannuler')?.addEventListener('click', () => {
-    const m = modale(`<h2>Annuler ce courrier</h2><p style="margin:0;color:var(--muet);font-size:13px">Le courrier reste dans le registre avec la mention « annulé » : un registre ne s'efface pas.</p><div class="champ"><label for="motif">Motif de l'annulation</label><input id="motif" required></div><div class="ligne-boutons"><button class="btn" id="mnon">Retour</button><button class="btn danger" id="moui">Confirmer l'annulation</button></div>`);
+    const m = modale(`<h2>Annuler ce courrier</h2><p style="margin:0;color:var(--muet);font-size:13px">Le courrier disparaît du registre et des rapports. Il reste retrouvable avec le filtre « Statut : Annulé » et peut être restauré.</p><div class="champ"><label for="motif">Motif de l'annulation</label><input id="motif" required></div><div class="ligne-boutons"><button class="btn" id="mnon">Retour</button><button class="btn danger" id="moui">Confirmer l'annulation</button></div>`);
     m.querySelector('#mnon').onclick = () => m.remove();
-    m.querySelector('#moui').onclick = async () => { const motif = m.querySelector('#motif').value.trim(); if (!motif) return toast('Indiquez le motif.', true); const { error } = await sb.from('courriers').update({ statut: 'annule', annule_motif: motif, annule_le: new Date().toISOString() }).eq('id', id); if (error) return toast(error.message, true); m.remove(); toast('Courrier annulé.'); router(); };
+    m.querySelector('#moui').onclick = async () => { const motif = m.querySelector('#motif').value.trim(); if (!motif) return toast('Indiquez le motif.', true); const { error } = await sb.from('courriers').update({ statut: 'annule', annule_motif: motif, annule_le: new Date().toISOString() }).eq('id', id); if (error) return toast(error.message, true); m.remove(); toast('Courrier annulé et retiré du registre.'); naviguer('#/' + (estArr ? 'arrivees' : 'departs')); };
   });
   vue.querySelector('#ajpj')?.addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return; const d = new Date(c.date_evenement); const ext = f.name.split('.').pop().toLowerCase();
@@ -844,11 +845,11 @@ const localISO = (s) => { const d = new Date(s); return `${iso(d)}T${pad(d.getHo
 // ------------------------------------------------------------------
 async function vueArchives() {
   const vue = coque('archives', ecranChargement('Chargement des données…'));
-  const { data: annees } = await sb.from('courriers').select('annee').neq('statut', 'brouillon').order('annee', { ascending: false });
+  const { data: annees } = await sb.from('courriers').select('annee').not('statut', 'in', '(brouillon,annule)').order('annee', { ascending: false });
   const listeAnnees = [...new Set((annees || []).map((a) => a.annee))]; if (!listeAnnees.length) listeAnnees.push(new Date().getFullYear());
   const sel = { annee: listeAnnees[0], mois: '', sens: '' };
   const rendre = async () => {
-    let req = sb.from('v_courriers').select('*').eq('annee', sel.annee).neq('statut', 'brouillon').order('date_evenement', { ascending: false }).limit(500);
+    let req = sb.from('v_courriers').select('*').eq('annee', sel.annee).not('statut', 'in', '(brouillon,annule)').order('date_evenement', { ascending: false }).limit(500);
     if (sel.mois) { const fin = new Date(sel.annee, Number(sel.mois), 0); req = req.gte('date_evenement', `${sel.annee}-${pad(sel.mois)}-01`).lte('date_evenement', iso(fin)); }
     if (sel.sens) req = req.eq('sens', sel.sens);
     const { data } = await req; const liste = data || [];
@@ -865,7 +866,7 @@ async function vueArchives() {
     vue.querySelector('#aa').onchange = (e) => { sel.annee = Number(e.target.value); rendre(); };
     vue.querySelector('#am').onchange = (e) => { sel.mois = e.target.value; rendre(); };
     vue.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { sel.sens = b.dataset.s; rendre(); });
-    vue.querySelector('#bexcel').onclick = async () => { const { data: tout } = await sb.from('v_courriers').select('*').eq('annee', sel.annee).neq('statut', 'brouillon').order('date_evenement'); exporterExcel(tout || [], `NEXORA_registre_${sel.annee}.xlsx`); };
+    vue.querySelector('#bexcel').onclick = async () => { const { data: tout } = await sb.from('v_courriers').select('*').eq('annee', sel.annee).not('statut', 'in', '(brouillon,annule)').order('date_evenement'); exporterExcel(tout || [], `NEXORA_registre_${sel.annee}.xlsx`); };
     lierLignes(vue);
   };
   await rendre();
@@ -895,12 +896,12 @@ async function vueRapports() {
   <section class="grille4">${TYPES.map(([t, l, d]) => `<div class="carte rc"><h2>${l}</h2><p>${d}</p><div class="bas"><button class="btn petit principal" data-pdf="${t}">${ICONES.telecharger}Générer le PDF</button>${t === 'annee' ? `<button class="btn petit" data-xlsx="annee">Registre Excel</button>` : ''}</div></div>`).join('')}</section>
   <section class="carte plein"><div class="tete"><h2>Rapports générés</h2></div><div class="defile">${liens.length ? `<table><thead><tr><th>Rapport</th><th>Période</th><th>Généré le</th><th><span class="sr">Télécharger</span></th></tr></thead><tbody>${liens.map((r) => `<tr><td style="font-weight:600">${LIB[r.type]}</td><td>${fmtDate(r.periode_debut)} – ${fmtDate(r.periode_fin)}</td><td>${fmtDateHeure(r.genere_le)}</td><td>${r.url ? `<a class="ico" href="${r.url}" target="_blank" rel="noopener" aria-label="Télécharger">${ICONES.telecharger}</a>` : '—'}</td></tr>`).join('')}</tbody></table>` : `<div class="vide">Aucun rapport généré pour l'instant.</div>`}</div></section>`;
   vue.querySelectorAll('[data-pdf]').forEach((b) => b.onclick = async () => { b.disabled = true; try { await genererRapport(b.dataset.pdf, new Date(vue.querySelector('#rdate').value || aujourdhui())); router(); } catch (e) { console.error(e); toast('Génération impossible : ' + e.message, true); b.disabled = false; } });
-  vue.querySelector('[data-xlsx]')?.addEventListener('click', async () => { const a = new Date(vue.querySelector('#rdate').value || aujourdhui()).getFullYear(); const { data } = await sb.from('v_courriers').select('*').eq('annee', a).neq('statut', 'brouillon').order('date_evenement'); exporterExcel(data || [], `NEXORA_registre_${a}.xlsx`); });
+  vue.querySelector('[data-xlsx]')?.addEventListener('click', async () => { const a = new Date(vue.querySelector('#rdate').value || aujourdhui()).getFullYear(); const { data } = await sb.from('v_courriers').select('*').eq('annee', a).not('statut', 'in', '(brouillon,annule)').order('date_evenement'); exporterExcel(data || [], `NEXORA_registre_${a}.xlsx`); });
 }
 
 async function genererRapport(type, ref) {
   const [debut, fin, libelle] = bornes(type, ref);
-  const { data } = await sb.from('v_courriers').select('*').gte('date_evenement', debut).lte('date_evenement', fin).neq('statut', 'brouillon').order('date_evenement');
+  const { data } = await sb.from('v_courriers').select('*').gte('date_evenement', debut).lte('date_evenement', fin).not('statut', 'in', '(brouillon,annule)').order('date_evenement');
   const liste = data || [];
   const { data: attente } = await sb.from('v_courriers').select('*').in('statut', ['recu', 'a_traiter', 'transmis']).order('echeance', { ascending: true, nullsFirst: false }).limit(50);
   const { data: evs } = await sb.from('evenements').select('*').eq('statut', 'a_venir').gte('debut', new Date(fin).toISOString()).lte('debut', ajouterJours(new Date(fin), 14).toISOString()).order('debut').limit(20);
