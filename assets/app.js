@@ -153,7 +153,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-018';
+const APP_VERSION = '2026-10-18-019';
 const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
@@ -409,7 +409,7 @@ async function vueRegistre(sens) {
 function exporterExcel(liste, nomFichier) {
   const lignes = liste.map((c) => ({
     'N° d\'ordre': c.numero_ordre, 'Sens': c.sens === 'arrivee' ? 'Arrivée' : 'Départ', 'Date': fmtDate(c.date_evenement), 'Date du courrier': fmtDate(c.date_courrier),
-    'Numéro du courrier': c.reference_externe || '', 'Expéditeur / Destinataire': c.contact_nom, 'Objet': c.objet, 'Type': c.type_nom || '', 'Catégorie': c.categorie_nom || '',
+    'Numéro du courrier': c.reference_externe || '', 'En réponse à': c.reference_liee || '', 'Expéditeur / Destinataire': c.contact_nom, 'Objet': c.objet, 'Type': c.type_nom || '', 'Catégorie': c.categorie_nom || '',
     'Service': c.service_nom_complet || c.service_nom || '', 'Signataire': c.signataire || '', 'Mode d\'envoi': MODES[c.mode_envoi] || '', 'Urgence': URGENCES[c.urgence] || '', 'Échéance': fmtDate(c.echeance),
     'Statut': (STATUTS[c.statut] || [c.statut])[0], 'Résumé': c.resume || '', 'Action demandée': c.action_demandee || '', 'Observations': c.observations || '', 'Pièces jointes': c.nb_pieces || 0,
   }));
@@ -457,7 +457,7 @@ async function vueEnregistrer(sens) {
         <div class="champ"><label for="cat">Catégorie</label><select id="cat"><option value="">—</option>${opt(etat.categories)}</select></div>
         ${estArr ? '' : `<div class="champ span2"><label for="signataire">Signataire <span id="d-signataire"></span></label><div style="display:flex;gap:8px;align-items:center"><select id="signataire" required style="flex:1 1 50%"><option value="">—</option>${(etat.signataires || []).map((g) => `<option value="${g.id}" data-interim="${g.interimaire ? 1 : 0}">${esc(g.fonction)}${g.nom ? ' · ' + esc(g.nom) : ''}</option>`).join('')}</select><input id="sign" placeholder="Nom de l'intérimaire" aria-label="Nom de l'intérimaire" style="flex:1 1 50%;display:none"></div></div>
         <div class="champ"><label for="mode">Mode d'envoi</label><select id="mode">${Object.entries(MODES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
-        <div class="champ span2"><label for="lie">Ce départ répond-il à un courrier reçu ? (facultatif)</label><select id="lie"><option value="">— Non, courrier indépendant —</option>${(arrivees || []).map((a) => `<option value="${a.id}">${esc(a.numero_ordre)} · ${esc(a.objet).slice(0, 70)}</option>`).join('')}</select></div>`}
+        <div class="champ span2"><label for="lie">Ce départ répond-il à un courrier reçu ? (facultatif) <span id="d-lie"></span></label><div style="display:flex;gap:8px;flex-wrap:wrap"><select id="lie" style="flex:1 1 55%"><option value="">— Non, courrier indépendant —</option>${(arrivees || []).map((a) => `<option value="${a.id}">${esc(a.numero_ordre)} · ${esc(a.objet).slice(0, 70)}</option>`).join('')}</select><input id="refliee" placeholder="ou référence du courrier reçu (ex. V/L n° 0061/MIS/DGAT/DCA du 18 juin 2026)" style="flex:1 1 40%"></div><span class="aide">Choisissez le courrier dans la liste s'il est enregistré dans NEXORA ; sinon, notez sa référence telle qu'elle figure sur le courrier.</span></div>`}
         <div class="champ"><label for="echeance">Échéance (facultatif) <span id="d-echeance"></span></label><input id="echeance" type="date"><span class="aide">Si renseignée, une alerte est programmée dans l'agenda 2 jours avant.</span></div>
         <div class="champ"><label><input type="checkbox" id="conf" style="width:18px;height:18px;accent-color:var(--vert-fonce)"> Courrier confidentiel</label><span class="aide">Exclu de la lecture automatique.</span></div>
       </div>
@@ -486,7 +486,7 @@ async function vueEnregistrer(sens) {
   vue.querySelector('#sa').onclick = () => naviguer('#/enregistrer/arrivee');
   // --- Brouillon local : rien ne se perd tant que le formulaire n'est pas fermé volontairement
   const CLE_BROUILLON = 'nexora_brouillon_' + sens;
-  const champsSauvables = ['contact', 'ref', 'dcour', 'devt', 'objet', 'type', 'service', 'service2', 'service_final', 'urgence', 'cat', 'signataire', 'sign', 'mode', 'lie', 'echeance', 'resume', 'action', 'obs'];
+  const champsSauvables = ['contact', 'ref', 'dcour', 'devt', 'objet', 'type', 'service', 'service2', 'service_final', 'urgence', 'cat', 'signataire', 'sign', 'mode', 'lie', 'refliee', 'echeance', 'resume', 'action', 'obs'];
   const sauverBrouillon = () => { try { const d = {}; champsSauvables.forEach((id) => { const el = vue.querySelector('#' + id); if (el) d[id] = el.value; }); d.conf = vue.querySelector('#conf').checked; d.lecture = lecture; d.fichierNom = fichier?.name || null; d.scanTemp = scanTemp; d.quand = Date.now(); localStorage.setItem(CLE_BROUILLON, JSON.stringify(d)); } catch (e) { /* ignore */ } };
   const effacerBrouillon = () => { try { localStorage.removeItem(CLE_BROUILLON); } catch (e) { /* ignore */ } };
   window.__effacerBrouillon = effacerBrouillon;
@@ -577,7 +577,9 @@ async function vueEnregistrer(sens) {
       const t = `%${ch.reference_liee.replace(/\s+/g, '').slice(-12)}%`;
       const { data: lies } = await sb.from('courriers').select('id,numero_ordre,objet').eq('sens', 'arrivee').ilike('reference_externe', t).limit(3);
       if (lies?.length) { vue.querySelector('#lie').value = lies[0].id; marquer('lie', 'ok'); }
+      else { const rl = vue.querySelector('#refliee'); if (rl) { rl.value = `${ch.reference_liee}${ch.reference_liee_date ? ' du ' + ch.reference_liee_date : ''}`; marquer('lie', fiableLecture(r) ? 'ok' : 'verif'); } }
     }
+    if (!estArr && !ch.reference) { marquer('ref', 'verif'); vue.querySelector('#ref').placeholder = 'numéro illisible : saisir'; }
     if (selSign && (ch.fonction_signataire || ch.signataire)) {
       const f = normaliser(ch.fonction_signataire || ''); const n = normaliser(ch.signataire || '');
       const g = (etat.signataires || []).find((x) => { const fx = normaliser(x.fonction); return (f && (fx.includes(f) || f.includes(fx.split(' ')[0] + ' ' + (fx.split(' ')[1] || '')))) || (x.nom && n && normaliser(x.nom).split(' ').some((m) => m.length > 3 && n.includes(m))); })
@@ -619,7 +621,7 @@ async function vueEnregistrer(sens) {
       const ligne = {
         sens, statut: statutFinal, contact_id, contact_nom: v('contact'), reference_externe: numeroCourrier, date_courrier: v('dcour'), date_evenement: v('devt') || aujourdhui(),
         annee: Number((v('devt') || aujourdhui()).slice(0, 4)), objet: v('objet'), type_id: v('type'), service_id: serviceId, urgence: v('urgence') || 'normal', categorie_id: v('cat'),
-        signataire: signataireTexte, signataire_id: sigObj?.id || null, mode_envoi: v('mode'), courrier_lie_id: v('lie'), echeance: v('echeance'), confidentiel: vue.querySelector('#conf').checked, resume: v('resume'), action_demandee: v('action'),
+        signataire: signataireTexte, signataire_id: sigObj?.id || null, mode_envoi: v('mode'), reference_liee: v('refliee'), courrier_lie_id: v('lie'), echeance: v('echeance'), confidentiel: vue.querySelector('#conf').checked, resume: v('resume'), action_demandee: v('action'),
         observations: v('obs'), cree_par: etat.profil.id, lecture_auto: lecture, lecture_auto_le: lecture ? new Date().toISOString() : null,
       };
       const { data: c, error } = await sb.from('courriers').insert(ligne).select('*').single(); if (error) throw error;
@@ -700,7 +702,7 @@ async function vueCourrier(id) {
         ${champ('Catégorie', esc(c.categorie_nom))}${champ('Urgence', URGENCES[c.urgence])}
         ${estArr ? '' : champ('Signataire', esc(c.signataire || c.signataire_fonction)) + champ("Mode d'envoi", MODES[c.mode_envoi])}
         ${champ('Échéance', fmtDate(c.echeance))}${champ('Action demandée', esc(c.action_demandee))}
-        ${lie ? champ('En réponse à', `<a href="#/courrier/${lie.id}">${esc(lie.numero_ordre)}</a> · ${esc(lie.objet)}`) : ''}
+        ${lie ? champ('En réponse à', `<a href="#/courrier/${lie.id}">${esc(lie.numero_ordre)}</a> · ${esc(lie.objet)}`) : c.reference_liee ? champ('En réponse au courrier', esc(c.reference_liee)) : ''}
         ${(reponses || []).length ? champ('Réponses', reponses.map((r) => `<a href="#/courrier/${r.id}">${esc(r.numero_ordre)}</a> (${fmtDate(r.date_evenement)})`).join('<br>')) : ''}
       </dl>
       ${c.resume ? `<div><div class="fiche"><dt>Résumé</dt></div><div style="padding:10px 12px;background:var(--fond);border-radius:10px">${esc(c.resume)}</div></div>` : ''}
