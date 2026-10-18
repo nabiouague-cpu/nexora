@@ -96,7 +96,7 @@ async function chargerProfil() {
   const { data: profil } = await sb.from('profils').select('*').eq('id', etat.session.user.id).maybeSingle();
   etat.profil = profil;
   const [s, t, k] = await Promise.all([
-    sb.from('services').select('*').eq('actif', true).order('nom'),
+    sb.from('v_services').select('*').eq('actif', true).order('ordre').order('nom'),
     sb.from('types_courrier').select('*').eq('actif', true).order('nom'),
     sb.from('categories').select('*').eq('actif', true).order('nom'),
   ]);
@@ -152,7 +152,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-17-010';
+const APP_VERSION = '2026-10-18-011';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -329,7 +329,7 @@ function tableCourriers(liste, cols) {
       case 'contact': return `<td>${esc(c.contact_nom)}</td>`;
       case 'objet': return `<td>${esc(c.objet)}</td>`;
       case 'type': return `<td>${esc(c.type_nom || '')}</td>`;
-      case 'service': return `<td>${esc(c.service_nom || '')}</td>`;
+      case 'service': return `<td>${esc(c.service_nom_complet || c.service_nom || '')}</td>`;
       case 'echeance': return `<td style="${c.echeance && c.echeance < aujourdhui() ? 'color:var(--bordeaux);font-weight:600' : ''}">${fmtDate(c.echeance)}</td>`;
       case 'statut': return `<td>${chipStatut(c)}</td>`;
       case 'scan': return `<td>${c.nb_pieces > 0 ? `<span class="chip gris">${c.nb_pieces} fichier${c.nb_pieces > 1 ? 's' : ''}</span>` : '—'}</td>`;
@@ -406,8 +406,8 @@ async function vueRegistre(sens) {
 function exporterExcel(liste, nomFichier) {
   const lignes = liste.map((c) => ({
     'N° d\'ordre': c.numero_ordre, 'Sens': c.sens === 'arrivee' ? 'Arrivée' : 'Départ', 'Date': fmtDate(c.date_evenement), 'Date du courrier': fmtDate(c.date_courrier),
-    'Référence': c.reference_externe || '', 'Expéditeur / Destinataire': c.contact_nom, 'Objet': c.objet, 'Type': c.type_nom || '', 'Catégorie': c.categorie_nom || '',
-    'Service': c.service_nom || '', 'Signataire': c.signataire || '', 'Mode d\'envoi': MODES[c.mode_envoi] || '', 'Urgence': URGENCES[c.urgence] || '', 'Échéance': fmtDate(c.echeance),
+    'Numéro du courrier': c.reference_externe || '', 'Expéditeur / Destinataire': c.contact_nom, 'Objet': c.objet, 'Type': c.type_nom || '', 'Catégorie': c.categorie_nom || '',
+    'Service': c.service_nom_complet || c.service_nom || '', 'Signataire': c.signataire || '', 'Mode d\'envoi': MODES[c.mode_envoi] || '', 'Urgence': URGENCES[c.urgence] || '', 'Échéance': fmtDate(c.echeance),
     'Statut': (STATUTS[c.statut] || [c.statut])[0], 'Résumé': c.resume || '', 'Action demandée': c.action_demandee || '', 'Observations': c.observations || '', 'Pièces jointes': c.nb_pieces || 0,
   }));
   const ws = XLSX.utils.json_to_sheet(lignes); ws['!cols'] = Object.keys(lignes[0] || { a: 1 }).map((k) => ({ wch: Math.min(60, Math.max(12, k.length + 4)) }));
@@ -442,18 +442,18 @@ async function vueEnregistrer(sens) {
       <div class="tete"><h2>Fiche du registre</h2><div style="font-size:13px;color:var(--muet)">N° d'ordre attribué à la validation</div></div>
       <div class="grille2">
         <div class="champ"><label for="contact">${estArr ? 'Expéditeur' : 'Destinataire'} <span id="d-contact"></span></label><input id="contact" required list="lcontacts"><datalist id="lcontacts"></datalist></div>
-        <div class="champ"><label for="ref">Référence du courrier <span id="d-ref"></span></label><input id="ref" placeholder="N° chez l'expéditeur"></div>
+        <div class="champ"><label for="ref">Numéro du courrier <span id="d-ref"></span></label><input id="ref" placeholder="N° porté sur le courrier"></div>
         <div class="champ"><label for="dcour">Date du courrier <span id="d-dcour"></span></label><input id="dcour" type="date"></div>
         <div class="champ"><label for="devt">${estArr ? 'Date de réception' : "Date d'envoi"}</label><input id="devt" type="date" value="${aujourdhui()}" required></div>
         <div class="champ span2"><label for="objet">Objet <span id="d-objet"></span></label><input id="objet" required></div>
         <div class="champ"><label for="type">Type de courrier <span id="d-type"></span></label><select id="type"><option value="">—</option>${opt(etat.types.filter((t) => t.sens === 'les_deux' || t.sens === sens))}</select></div>
-        <div class="champ"><label for="service">${estArr ? 'Destinataire interne' : 'Service émetteur'} <span id="d-service"></span></label><select id="service"><option value="">—</option>${opt(etat.services, etat.profil.service_id)}</select></div>
+        <div class="champ"><label for="service">${estArr ? 'Destinataire interne' : 'Service émetteur'} <span id="d-service"></span></label><select id="service"><option value="">—</option>${etat.services.filter((x) => !x.parent_id).map((x) => `<option value="${x.id}" ${x.id === etat.profil.service_id ? 'selected' : ''}>${esc(x.nom)}${etat.services.some((y) => y.parent_id === x.id) ? ' ›' : ''}</option>`).join('')}</select><input type="hidden" id="service_final"><span class="aide" id="service_aide"></span></div>
         <div class="champ"><label for="urgence">Niveau d'urgence <span id="d-urgence"></span></label><select id="urgence">${Object.entries(URGENCES).map(([k, l]) => `<option value="${k}" ${k === 'normal' ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="champ"><label for="cat">Catégorie</label><select id="cat"><option value="">—</option>${opt(etat.categories)}</select></div>
         ${estArr ? '' : `<div class="champ"><label for="sign">Signataire</label><input id="sign" placeholder="Qui signe le courrier"></div>
         <div class="champ"><label for="mode">Mode d'envoi</label><select id="mode">${Object.entries(MODES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
         <div class="champ span2"><label for="lie">En réponse au courrier arrivée</label><select id="lie"><option value="">— Aucun —</option>${(arrivees || []).map((a) => `<option value="${a.id}">${esc(a.numero_ordre)} · ${esc(a.objet).slice(0, 70)}</option>`).join('')}</select></div>`}
-        <div class="champ"><label for="echeance">Échéance <span id="d-echeance"></span></label><input id="echeance" type="date"></div>
+        <div class="champ"><label for="echeance">Échéance (facultatif) <span id="d-echeance"></span></label><input id="echeance" type="date"><span class="aide">Si renseignée, une alerte est programmée dans l'agenda 2 jours avant.</span></div>
         <div class="champ"><label><input type="checkbox" id="conf" style="width:18px;height:18px;accent-color:var(--vert-fonce)"> Courrier confidentiel</label><span class="aide">Exclu de la lecture automatique.</span></div>
       </div>
       <div class="champ"><label for="resume">Résumé <span id="d-resume"></span></label><textarea id="resume" rows="3"></textarea></div>
@@ -465,6 +465,19 @@ async function vueEnregistrer(sens) {
   </div>
   <style>@media (max-width:980px){.deux-col{grid-template-columns:1fr !important}}</style>`;
 
+  // Direction → sous-service (fenêtre)
+  const selSrv = vue.querySelector('#service'), srvFinal = vue.querySelector('#service_final'), srvAide = vue.querySelector('#service_aide');
+  const choisirSousService = (direction) => {
+    const enfants = etat.services.filter((y) => y.parent_id === direction.id);
+    const m = modale(`<h2>${esc(direction.nom)}</h2><p style="margin:0;font-size:13px;color:var(--ink-soft)">À quel service de cette direction ce courrier est-il destiné ?</p>
+      <div class="champ"><label for="ssrv">Service</label><select id="ssrv"><option value="${direction.id}">— La direction elle-même —</option>${enfants.map((e) => `<option value="${e.id}">${esc(e.nom)}</option>`).join('')}</select></div>
+      <div class="ligne-boutons"><button class="btn" id="mnon" type="button">Retour</button><button class="btn principal" id="moui" type="button">Valider</button></div>`);
+    const fermer = (val) => { m.remove(); if (val) { srvFinal.value = val; const x = etat.services.find((y) => y.id === val); srvAide.textContent = x && x.parent_id ? `${direction.nom} › ${x.nom}` : direction.nom; } };
+    m.querySelector('#mnon').onclick = () => { fermer(direction.id); };
+    m.querySelector('#moui').onclick = () => fermer(m.querySelector('#ssrv').value);
+  };
+  selSrv.onchange = () => { const d = etat.services.find((y) => y.id === selSrv.value); srvFinal.value = selSrv.value; srvAide.textContent = ''; if (d && etat.services.some((y) => y.parent_id === d.id)) choisirSousService(d); };
+  if (selSrv.value) srvFinal.value = selSrv.value;
   vue.querySelector('#sa').onclick = () => naviguer('#/enregistrer/arrivee');
   const reprise = sessionStorage.getItem('nexora_lecture');
   if (reprise) { sessionStorage.removeItem('nexora_lecture'); try { const { lecture: r, nom } = JSON.parse(reprise); lecture = r; setTimeout(() => { appliquerLecture(r); vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau vert">${ICONES.ok}Lecture reprise (${esc(nom || 'document')}) · pensez à rattacher à nouveau le scan</div>`; }, 50); } catch (e) { /* ignore */ } }
@@ -524,7 +537,8 @@ async function vueEnregistrer(sens) {
     mettre('contact', ch.contact); mettre('ref', ch.reference); mettre('dcour', ch.date_courrier); mettre('objet', ch.objet); mettre('resume', ch.resume); mettre('action', ch.action_demandee); mettre('echeance', ch.echeance);
     if (ch.urgence && URGENCES[ch.urgence]) mettre('urgence', ch.urgence);
     const typ = etat.types.find((t) => t.nom.toLowerCase() === String(ch.type || '').toLowerCase()); if (typ) mettre('type', typ.id);
-    const srv = etat.services.find((s) => s.nom.toLowerCase() === String(ch.service || '').toLowerCase()); if (srv) mettre('service', srv.id);
+    const srv = etat.services.find((s) => s.nom.toLowerCase() === String(ch.service || '').toLowerCase());
+    if (srv) { const parent = srv.parent_id ? etat.services.find((y) => y.id === srv.parent_id) : null; mettre('service', parent ? parent.id : srv.id); vue.querySelector('#service_final').value = srv.id; vue.querySelector('#service_aide').textContent = parent ? `${parent.nom} › ${srv.nom}` : ''; }
     if (ch.categorie_id) mettre('cat', ch.categorie_id);
     if (ch.montant && !vue.querySelector('#obs').value) vue.querySelector('#obs').value = `Montant : ${ch.montant}`;
     const fs = vue.querySelector('#fevs'); const evs = r.evenements || [];
@@ -539,7 +553,7 @@ async function vueEnregistrer(sens) {
       // contact
       let contact_id = null; const { data: cx } = await sb.from('contacts').select('id').ilike('nom', v('contact')).maybeSingle();
       if (cx) contact_id = cx.id; else { const { data: nc } = await sb.from('contacts').insert({ nom: v('contact') }).select('id').single(); contact_id = nc?.id; }
-      let serviceId = v('service');
+      let serviceId = v('service_final') || v('service');
       if (serviceId === '__nouveau__') { const o = vue.querySelector('#service option[value="__nouveau__"]'); const nom = o?.dataset.nom || 'Nouveau service'; const code = nom.split(/\s+/).filter((m) => m.length > 2 && !/^(de|la|le|les|des|et|du|l')$/i.test(m)).map((m) => m[0].toUpperCase()).join('').slice(0, 6) || 'SRV'; const { data: ns, error: es } = await sb.from('services').insert({ code: code + '-' + Math.floor(Math.random() * 90 + 10), nom }).select('id').single(); if (es) throw es; serviceId = ns.id; await chargerProfil(); }
       const ligne = {
         sens, statut: statutFinal, contact_id, contact_nom: v('contact'), reference_externe: v('ref'), date_courrier: v('dcour'), date_evenement: v('devt') || aujourdhui(),
@@ -559,7 +573,10 @@ async function vueEnregistrer(sens) {
       // événements détectés
       const cases = [...vue.querySelectorAll('[data-ev]:checked')];
       for (const cb of cases) { const e = (lecture?.evenements || [])[Number(cb.dataset.ev)]; if (e) await creerEvenement({ courrier_id: c.id, titre: e.titre, type: e.type || 'echeance', debut: e.debut, fin: e.fin || null, lieu: e.lieu || null, description: e.description || null }); }
-      if (statutFinal !== 'brouillon' && c.echeance && !cases.length) await creerEvenement({ courrier_id: c.id, titre: `Échéance · ${c.objet}`.slice(0, 120), type: 'echeance', debut: c.echeance + 'T08:00:00' });
+      if (statutFinal !== 'brouillon' && c.echeance) {
+        const dejaCouvert = cases.some((cb) => (lecture?.evenements || [])[Number(cb.dataset.ev)]?.debut?.slice(0, 10) === c.echeance);
+        if (!dejaCouvert) await creerEvenement({ courrier_id: c.id, titre: `Échéance · ${c.objet}`.slice(0, 120), type: 'echeance', debut: c.echeance + 'T08:00:00', description: `Alerte automatique : échéance du courrier ${c.numero_ordre || ''}`.trim() }, [2]);
+      }
       toast(statutFinal === 'brouillon' ? 'Brouillon enregistré.' : `Courrier enregistré sous le n° ${c.numero_ordre}.`);
       naviguer('#/courrier/' + c.id);
     } catch (err) { console.error(err); toast('Enregistrement impossible : ' + (err.message || err), true); bb.disabled = bv.disabled = false; }
@@ -576,10 +593,10 @@ async function apprendre(c) {
   await sb.from('apprentissage').upsert({ cle, contact_nom: c.contact_nom, type_id: c.type_id, service_id: c.service_id, categorie_id: c.categorie_id, urgence: c.urgence, nb: (x?.nb || 0) + 1, modifie_le: new Date().toISOString() });
 }
 
-async function creerEvenement(e) {
+async function creerEvenement(e, joursRappel = [7, 2, 1]) {
   const { data: ev, error } = await sb.from('evenements').insert({ ...e, fin: e.fin || null, cree_par: etat.profil.id }).select('id,debut').single(); if (error) throw error;
   const debut = new Date(ev.debut); const rappels = [];
-  for (const j of [7, 2, 1]) { const r = ajouterJours(debut, -j); r.setHours(8, 0, 0, 0); if (r > new Date()) rappels.push({ evenement_id: ev.id, declenche_le: r.toISOString(), canal: 'app' }); }
+  for (const j of joursRappel) { const r = ajouterJours(debut, -j); r.setHours(8, 0, 0, 0); if (r > new Date()) rappels.push({ evenement_id: ev.id, declenche_le: r.toISOString(), canal: 'app' }); }
   if (rappels.length) await sb.from('rappels').insert(rappels);
   return ev;
 }
@@ -611,9 +628,9 @@ async function vueCourrier(id) {
     <section class="carte span2">
       <div class="tete"><h2>Fiche du registre</h2><span style="font-size:12px;color:var(--muet)">Enregistré le ${fmtDateHeure(c.cree_le)}</span></div>
       <dl class="fiche grille2" style="margin:0">
-        ${champ(estArr ? 'Expéditeur' : 'Destinataire', esc(c.contact_nom))}${champ('Référence du courrier', esc(c.reference_externe))}
+        ${champ(estArr ? 'Expéditeur' : 'Destinataire', esc(c.contact_nom))}${champ('Numéro du courrier', esc(c.reference_externe))}
         ${champ('Date du courrier', fmtDate(c.date_courrier))}${champ(estArr ? 'Date de réception' : "Date d'envoi", fmtDate(c.date_evenement))}
-        ${champ('Type', esc(c.type_nom))}${champ(estArr ? 'Destinataire interne' : 'Service émetteur', esc(c.service_nom))}
+        ${champ('Type', esc(c.type_nom))}${champ(estArr ? 'Destinataire interne' : 'Service émetteur', esc(c.service_nom_complet || c.service_nom))}
         ${champ('Catégorie', esc(c.categorie_nom))}${champ('Urgence', URGENCES[c.urgence])}
         ${estArr ? '' : champ('Signataire', esc(c.signataire)) + champ("Mode d'envoi", MODES[c.mode_envoi])}
         ${champ('Échéance', fmtDate(c.echeance))}${champ('Action demandée', esc(c.action_demandee))}
@@ -649,7 +666,7 @@ async function vueCourrier(id) {
     toast('Fichier ajouté.'); router();
   });
   vue.querySelector('#btrans')?.addEventListener('click', () => {
-    const m = modale(`<h2>Transmettre le courrier</h2><div class="champ"><label for="tsrv">Service</label><select id="tsrv"><option value="">—</option>${etat.services.map((s) => `<option value="${s.id}">${esc(s.nom)}</option>`).join('')}</select></div><div class="champ"><label for="tpers">Personne (facultatif)</label><input id="tpers"></div><div class="champ"><label for="tnote">Note</label><input id="tnote"></div><div class="ligne-boutons"><button class="btn" id="mnon">Retour</button><button class="btn principal" id="moui">Transmettre</button></div>`);
+    const m = modale(`<h2>Transmettre le courrier</h2><div class="champ"><label for="tsrv">Service</label><select id="tsrv"><option value="">—</option>${etat.services.map((s) => `<option value="${s.id}">${esc(s.nom_complet || s.nom)}</option>`).join('')}</select></div><div class="champ"><label for="tpers">Personne (facultatif)</label><input id="tpers"></div><div class="champ"><label for="tnote">Note</label><input id="tnote"></div><div class="ligne-boutons"><button class="btn" id="mnon">Retour</button><button class="btn principal" id="moui">Transmettre</button></div>`);
     m.querySelector('#mnon').onclick = () => m.remove();
     m.querySelector('#moui').onclick = async () => {
       const { error } = await sb.from('transmissions').insert({ courrier_id: id, vers_service_id: m.querySelector('#tsrv').value || null, vers_personne: m.querySelector('#tpers').value.trim() || null, note: m.querySelector('#tnote').value.trim() || null, cree_par: etat.profil.id });
@@ -838,8 +855,8 @@ async function vueParametres() {
   <div class="bandeau vert" style="align-self:flex-start">Les directions, services, types de courrier et catégories que vous ajoutez ici alimentent les listes déroulantes de l'enregistrement, les filtres et la recherche.</div>
   <div class="grille3">
     <section class="carte"><div class="tete"><h2>Directions et services internes</h2><span class="chip gris">${(tousServices || []).filter((s) => s.actif).length} actifs</span></div>
-      <div>${(tousServices || []).map((s) => ligneRef('services', s, `${esc(s.code)}${s.responsable ? ' · ' + esc(s.responsable) : ''}${s.description ? ' · ' + esc(s.description) : ''}`)).join('')}</div>
-      ${gere ? `<form id="fsrv" class="grille2" style="gap:10px;margin-top:6px"><div class="champ"><label for="scode">Sigle</label><input id="scode" placeholder="DRH" maxlength="12" required></div><div class="champ"><label for="snom">Nom de la direction / du service</label><input id="snom" placeholder="Direction des ressources humaines" required></div><div class="champ"><label for="sresp">Responsable (facultatif)</label><input id="sresp" placeholder="Nom du directeur / chef de service"></div><div class="champ"><label for="sdesc">Description (facultatif)</label><input id="sdesc" placeholder="Rôle, mots-clés…"></div><button class="btn petit principal" type="submit" style="align-self:end">${ICONES.plus}Ajouter</button></form>` : ''}</section>
+      <div>${(tousServices || []).filter((s) => !s.parent_id).sort((a, b) => (a.ordre - b.ordre) || a.nom.localeCompare(b.nom)).map((s) => ligneRef('services', s, `${esc(s.code)}${s.responsable ? ' · ' + esc(s.responsable) : ''}${s.description ? ' · ' + esc(s.description) : ''}`) + (tousServices || []).filter((e) => e.parent_id === s.id).sort((a, b) => a.ordre - b.ordre).map((e) => `<div style="padding-left:22px">${ligneRef('services', e, `${esc(e.code)}${e.responsable ? ' · ' + esc(e.responsable) : ''}`)}</div>`).join('')).join('')}</div>
+      ${gere ? `<form id="fsrv" class="grille2" style="gap:10px;margin-top:6px"><div class="champ"><label for="scode">Sigle</label><input id="scode" placeholder="DRH" maxlength="12" required></div><div class="champ"><label for="snom">Nom de la direction / du service</label><input id="snom" placeholder="Direction des ressources humaines" required></div><div class="champ"><label for="sparent">Rattaché à (facultatif)</label><select id="sparent"><option value="">— Direction autonome —</option>${(tousServices || []).filter((x) => !x.parent_id && x.actif).map((x) => `<option value="${x.id}">${esc(x.nom)}</option>`).join('')}</select></div><div class="champ"><label for="sresp">Responsable (facultatif)</label><input id="sresp" placeholder="Nom du directeur / chef de service"></div><div class="champ span2"><label for="sdesc">Description (facultatif)</label><input id="sdesc" placeholder="Rôle, mots-clés…"></div><button class="btn petit principal" type="submit" style="align-self:end">${ICONES.plus}Ajouter</button></form>` : ''}</section>
     <section class="carte"><div class="tete"><h2>Types de courrier</h2><span class="chip gris">${(tousTypes || []).filter((t) => t.actif).length} actifs</span></div>
       <div>${(tousTypes || []).map((t) => ligneRef('types_courrier', t, SENS[t.sens])).join('')}</div>
       ${gere ? `<form id="ftyp" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;align-items:flex-end"><div class="champ" style="flex:1 1 160px"><label for="tnom">Nouveau type</label><input id="tnom" placeholder="Ex. Note circulaire" required></div><div class="champ"><label for="tsens">Sens</label><select id="tsens"><option value="les_deux">Arrivée et départ</option><option value="arrivee">Arrivée</option><option value="depart">Départ</option></select></div><button class="btn petit principal" type="submit">${ICONES.plus}Ajouter</button></form>` : ''}</section>
@@ -861,21 +878,21 @@ async function vueParametres() {
   vue.querySelector('#fnom').onsubmit = async (e) => { e.preventDefault(); const nom = vue.querySelector('#pnom').value.trim(); if (!nom) return; const { error } = await sb.from('profils').update({ nom }).eq('id', p.id); if (error) return toast(error.message, true); etat.profil.nom = nom; toast('Nom enregistré.'); router(); };
   vue.querySelector('#fmdp').onsubmit = async (e) => { e.preventDefault(); if (vue.querySelector('#n1').value !== vue.querySelector('#n2').value) return toast('Les deux mots de passe diffèrent.', true); const { error } = await sb.auth.updateUser({ password: vue.querySelector('#n1').value }); if (error) return toast(error.message, true); toast('Mot de passe mis à jour.'); e.target.reset(); };
   const apres = async (msg) => { await chargerProfil(); toast(msg); router(); };
-  vue.querySelector('#fsrv')?.addEventListener('submit', async (e) => { e.preventDefault(); const { error } = await sb.from('services').insert({ code: vue.querySelector('#scode').value.trim().toUpperCase(), nom: vue.querySelector('#snom').value.trim(), responsable: vue.querySelector('#sresp').value.trim() || null, description: vue.querySelector('#sdesc').value.trim() || null }); if (error) return toast(error.message.includes('duplicate') ? 'Ce sigle existe déjà.' : error.message, true); apres('Direction / service ajouté.'); });
+  vue.querySelector('#fsrv')?.addEventListener('submit', async (e) => { e.preventDefault(); const { error } = await sb.from('services').insert({ code: vue.querySelector('#scode').value.trim().toUpperCase(), nom: vue.querySelector('#snom').value.trim(), parent_id: vue.querySelector('#sparent').value || null, responsable: vue.querySelector('#sresp').value.trim() || null, description: vue.querySelector('#sdesc').value.trim() || null }); if (error) return toast(error.message.includes('duplicate') ? 'Ce sigle existe déjà.' : error.message, true); apres('Direction / service ajouté.'); });
   vue.querySelector('#ftyp')?.addEventListener('submit', async (e) => { e.preventDefault(); const { error } = await sb.from('types_courrier').insert({ nom: vue.querySelector('#tnom').value.trim(), sens: vue.querySelector('#tsens').value }); if (error) return toast(error.message.includes('duplicate') ? 'Ce type existe déjà.' : error.message, true); apres('Type de courrier ajouté.'); });
   vue.querySelector('#fcat')?.addEventListener('submit', async (e) => { e.preventDefault(); const { error } = await sb.from('categories').insert({ nom: vue.querySelector('#knom').value.trim() }); if (error) return toast(error.message.includes('duplicate') ? 'Cette catégorie existe déjà.' : error.message, true); apres('Catégorie ajoutée.'); });
   vue.querySelectorAll('[data-actif]').forEach((b) => b.onclick = async () => { const [table, id, actif] = b.dataset.actif.split(':'); const { error } = await sb.from(table).update({ actif: actif === '1' }).eq('id', id); if (error) return toast(error.message, true); apres(actif === '1' ? 'Réactivé.' : 'Désactivé.'); });
   vue.querySelectorAll('[data-modif]').forEach((b) => b.onclick = () => {
     const [table, id] = b.dataset.modif.split(':'); const x = (table === 'services' ? tousServices : table === 'types_courrier' ? tousTypes : toutesCat).find((y) => y.id === id); if (!x) return;
     const m = modale(`<h2>Modifier</h2>
-      ${table === 'services' ? `<div class="grille2"><div class="champ"><label for="mcode">Sigle</label><input id="mcode" value="${esc(x.code)}" maxlength="12"></div><div class="champ"><label for="mnom">Nom</label><input id="mnom" value="${esc(x.nom)}"></div><div class="champ"><label for="mresp">Responsable</label><input id="mresp" value="${esc(x.responsable || '')}"></div><div class="champ"><label for="mdesc">Description</label><input id="mdesc" value="${esc(x.description || '')}"></div></div>` : ''}
+      ${table === 'services' ? `<div class="grille2"><div class="champ"><label for="mcode">Sigle</label><input id="mcode" value="${esc(x.code)}" maxlength="12"></div><div class="champ"><label for="mnom">Nom</label><input id="mnom" value="${esc(x.nom)}"></div><div class="champ"><label for="mparent">Rattaché à</label><select id="mparent"><option value="">— Direction autonome —</option>${(tousServices || []).filter((y) => !y.parent_id && y.id !== x.id).map((y) => `<option value="${y.id}" ${x.parent_id === y.id ? 'selected' : ''}>${esc(y.nom)}</option>`).join('')}</select></div><div class="champ"><label for="mresp">Responsable</label><input id="mresp" value="${esc(x.responsable || '')}"></div><div class="champ span2"><label for="mdesc">Description</label><input id="mdesc" value="${esc(x.description || '')}"></div></div>` : ''}
       ${table === 'types_courrier' ? `<div class="grille2"><div class="champ"><label for="mnom">Nom</label><input id="mnom" value="${esc(x.nom)}"></div><div class="champ"><label for="msens">Sens</label><select id="msens">${Object.entries(SENS).map(([k, l]) => `<option value="${k}" ${x.sens === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>` : ''}
       ${table === 'categories' ? `<div class="champ"><label for="mnom">Nom</label><input id="mnom" value="${esc(x.nom)}"></div>` : ''}
       <div class="ligne-boutons"><button class="btn" id="mnon">Retour</button><button class="btn principal" id="moui">Enregistrer</button></div>`);
     m.querySelector('#mnon').onclick = () => m.remove();
     m.querySelector('#moui').onclick = async () => {
       const v = (id2) => m.querySelector('#' + id2)?.value?.trim();
-      const maj = table === 'services' ? { code: v('mcode').toUpperCase(), nom: v('mnom'), responsable: v('mresp') || null, description: v('mdesc') || null } : table === 'types_courrier' ? { nom: v('mnom'), sens: v('msens') } : { nom: v('mnom') };
+      const maj = table === 'services' ? { code: v('mcode').toUpperCase(), nom: v('mnom'), parent_id: m.querySelector('#mparent').value || null, responsable: v('mresp') || null, description: v('mdesc') || null } : table === 'types_courrier' ? { nom: v('mnom'), sens: v('msens') } : { nom: v('mnom') };
       if (!maj.nom) return toast('Le nom est obligatoire.', true);
       const { error } = await sb.from(table).update(maj).eq('id', id); if (error) return toast(error.message, true); m.remove(); apres('Modifié.');
     };

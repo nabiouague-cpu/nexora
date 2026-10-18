@@ -154,7 +154,7 @@ function serviceDansTexte(texte, services) {
 function devinerService(texte, services) {
   const t = normaliser(texte);
   const nomme = serviceDansTexte(texte, services); if (nomme) return nomme.nom;
-  const regles = [[/finan|comptab|facture|paiement|budget|credit|tresor|marche public/, ['SF', 'DAF', 'DFC']], [/ressources humaines|personnel|recrutement|affectation|conge|carriere|candidature/, ['RH', 'DRH']], [/formation|etudiant|eleve|concours|cycle|pedagog|cours|scolarite|stage|filiere|promotion/, ['DE', 'DEP', 'DF']], [/fourniture|materiel|entretien|logistique|vehicule|colis|livraison|maintenance/, ['MG', 'DMG', 'SMG']]];
+  const regles = [[/ressources humaines|personnel|recrutement|affectation|conge|carriere|candidature/, ['DFA-RH', 'RH', 'DRH']], [/comptab|facture|paiement|budget|credit|tresor|marche public|reglement|devis/, ['DFA-COMPTA', 'SF', 'DAF']], [/fourniture|materiel|entretien|logistique|vehicule|colis|livraison|maintenance|batiment/, ['DFA-MG', 'MG', 'SMG']], [/concours|candidat|inscription|epreuve|admission/, ['SCONC']], [/informatique|logiciel|reseau|ordinateur|serveur|site web|numerique/, ['SI']], [/communication|presse|media|journaliste|evenement|ceremonie|invitation/, ['SCOM']], [/qualite|audit|certification|iso|procedure/, ['SQ']], [/ecole des finances|finances publiques|tresor public|impots|douane/, ['DGEF']], [/secretariat general|secretaire general/, ['SG']], [/formation|etudiant|eleve|cycle|pedagog|cours|scolarite|stage|filiere|promotion/, ['DE', 'DEP']]];
   for (const [re, codes] of regles) if (re.test(t)) { const s = services.find((x) => codes.includes(x.code)); if (s) return s.nom; }
   const dg = services.find((x) => x.code === 'DG'); return dg ? dg.nom : null;
 }
