@@ -154,7 +154,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-024';
+const APP_VERSION = '2026-10-18-025';
 const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
@@ -412,7 +412,7 @@ async function vueRegistre(sens) {
 function exporterExcel(liste, nomFichier) {
   const lignes = liste.map((c) => ({
     'N° d\'ordre': c.numero_ordre, 'Sens': c.sens === 'arrivee' ? 'Arrivée' : 'Départ', 'Date d\'envoi / réception': fmtDate(c.date_evenement), 'Date du courrier': fmtDate(c.date_courrier), 'Date d\'enregistrement': fmtDate(c.date_enregistrement || c.cree_le),
-    'Numéro du courrier': c.reference_externe || '', 'En réponse à': c.reference_liee || '', 'Expéditeur / Destinataire': c.contact_nom, 'Objet': c.objet, 'Type': c.type_nom || '', 'Catégorie': c.categorie_nom || '',
+    'Numéro du courrier': c.reference_externe || '', 'En réponse à': c.reference_liee || '', 'Structure': c.correspondant_type === 'interne' ? 'Interne' : 'Externe', 'Expéditeur / Destinataire': c.correspondant_type === 'interne' ? (c.structure_interne_nom || c.contact_nom) : (c.structure_externe || c.contact_nom), 'Personne / fonction': c.contact_personne || '', 'Objet': c.objet, 'Type': c.type_nom || '', 'Catégorie': c.categorie_nom || '',
     'Service': c.service_nom_complet || c.service_nom || '', 'Signataire': c.signataire || '', 'Mode d\'envoi': MODES[c.mode_envoi] || '', 'Urgence': URGENCES[c.urgence] || '', 'Échéance': fmtDate(c.echeance),
     'Statut': (STATUTS[c.statut] || [c.statut])[0], 'Résumé': c.resume || '', 'Action demandée': c.action_demandee || '', 'Observations': c.observations || '', 'Pièces jointes': c.nb_pieces || 0,
   }));
@@ -447,7 +447,14 @@ async function vueEnregistrer(sens, existant = null) {
     <form class="carte" id="ffiche" aria-label="Fiche du courrier">
       <div class="tete"><h2>Fiche du registre</h2><div style="font-size:13px;color:var(--muet)">N° d'ordre attribué à la validation</div></div>
       <div class="grille2">
-        <div class="champ"><label for="contact">${estArr ? 'Expéditeur' : 'Destinataire'} <span id="d-contact"></span></label><input id="contact" required list="lcontacts"><datalist id="lcontacts"></datalist></div>
+        <div class="champ span2"><label>${estArr ? 'Expéditeur du courrier' : 'Destinataire du courrier'} <span id="d-contact"></span></label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <div class="seg" role="group" aria-label="Type de structure"><button type="button" id="ct-ext" class="on">Structure externe</button><button type="button" id="ct-int">Structure interne</button></div>
+            <input type="hidden" id="ct-type" value="externe">
+            <input id="contact" list="lcontacts" placeholder="Ministère, partenaire, organisme… (ex. Ministère de la Fonction publique)" style="flex:1 1 320px"><datalist id="lcontacts"></datalist>
+            <select id="struct_int" style="flex:1 1 320px;display:none"><option value="">— Choisir la structure interne —</option>${etat.services.filter((x) => x.code !== 'EGAD').map((x) => `<option value="${x.id}">${esc(x.nom_complet || x.nom)}</option>`).join('')}</select>
+            <input id="contact_personne" placeholder="Personne ou fonction (facultatif) — ex. Madame la Coordonnatrice de la filière…" style="flex:1 1 320px">
+          </div></div>
         <div class="champ"><label for="ref">Numéro du courrier <span id="d-ref"></span></label>${estArr ? `<input id="ref" placeholder="N° porté sur le courrier">` : `<div style="display:flex;align-items:center;gap:6px"><span style="color:var(--ink-soft)">N°</span><input id="ref" placeholder="027" inputmode="numeric" style="width:110px;flex:none;font-family:var(--font-mono)"><span id="ref-suffixe" style="font-family:var(--font-mono);font-size:13px;color:var(--ink);white-space:nowrap">${SUFFIXE_DEPART}</span></div><span class="aide">Saisissez seulement le numéro écrit sur le courrier ; le reste est ajouté automatiquement.</span>`}</div>
         ${estArr ? `<div class="champ"><label for="dcour">Date du courrier <span id="d-dcour"></span></label><input id="dcour" type="date"><span class="aide">Date écrite par l'expéditeur.</span></div>
         <div class="champ"><label for="devt">Date de réception</label><input id="devt" type="date" value="${aujourdhui()}" required></div>` : `<div class="champ"><label for="devt">Date d'envoi <span id="d-dcour"></span></label><input id="devt" type="date" required><span class="aide">Date portée sur le courrier (tampon dateur).</span><input type="hidden" id="dcour"></div>
@@ -474,6 +481,11 @@ async function vueEnregistrer(sens, existant = null) {
   </div>
   <style>@media (max-width:980px){.deux-col{grid-template-columns:1fr !important}}</style>`;
 
+  // Correspondant : structure externe (saisie) ou interne (liste)
+  const ctType = vue.querySelector('#ct-type'), ctExt = vue.querySelector('#ct-ext'), ctInt = vue.querySelector('#ct-int'), ctContact = vue.querySelector('#contact'), ctInterne = vue.querySelector('#struct_int');
+  const majCorrespondant = (type) => { ctType.value = type; ctExt.classList.toggle('on', type === 'externe'); ctInt.classList.toggle('on', type === 'interne'); ctContact.style.display = type === 'externe' ? '' : 'none'; ctInterne.style.display = type === 'interne' ? '' : 'none'; };
+  ctExt.onclick = () => { majCorrespondant('externe'); vue.querySelector('#ffiche').dispatchEvent(new Event('change')); };
+  ctInt.onclick = () => { majCorrespondant('interne'); vue.querySelector('#ffiche').dispatchEvent(new Event('change')); };
   // Direction → seconde liste déroulante juste à côté (comme un sous-menu)
   const selSrv = vue.querySelector('#service'), selSrv2 = vue.querySelector('#service2'), srvFinal = vue.querySelector('#service_final');
   const selSign = vue.querySelector('#signataire');
@@ -493,14 +505,15 @@ async function vueEnregistrer(sens, existant = null) {
   const CLE_BROUILLON = 'nexora_brouillon_' + sens + (existant ? '_' + existant.id : '');
   if (existant) {
     const mettreV = (id, val) => { const el = vue.querySelector('#' + id); if (el && val != null) el.value = val; };
-    mettreV('contact', existant.contact_nom); mettreV('objet', existant.objet); mettreV('type', existant.type_id); mettreV('urgence', existant.urgence); mettreV('cat', existant.categorie_id);
+    if (existant.correspondant_type === 'interne' && existant.structure_interne_id) { majCorrespondant('interne'); mettreV('struct_int', existant.structure_interne_id); } else { majCorrespondant('externe'); mettreV('contact', existant.structure_externe || existant.contact_nom); }
+    mettreV('contact_personne', existant.contact_personne); mettreV('objet', existant.objet); mettreV('type', existant.type_id); mettreV('urgence', existant.urgence); mettreV('cat', existant.categorie_id);
     mettreV('echeance', existant.echeance); mettreV('resume', existant.resume); mettreV('action', existant.action_demandee); mettreV('obs', existant.observations); mettreV('devt', existant.date_evenement);
     if (estArr) { mettreV('dcour', existant.date_courrier); const srv = etat.services.find((x) => x.id === existant.service_id); if (srv) { mettreV('service', srv.parent_id || srv.id); } }
     else { const m = String(existant.reference_externe || '').match(/N[°º]?\s*([^\/\s]+)/i); mettreV('ref', m ? m[1] : ''); mettreV('mode', existant.mode_envoi); mettreV('lie', existant.courrier_lie_id); mettreV('refliee', existant.reference_liee); mettreV('signataire', existant.signataire_id); if (existant.signataire && /\(intérimaire\)/.test(existant.signataire)) mettreV('sign', existant.signataire.replace(/\s*\(intérimaire\)/, '')); }
     if (estArr) mettreV('ref', existant.reference_externe);
     vue.querySelector('#conf').checked = !!existant.confidentiel;
   }
-  const champsSauvables = ['contact', 'ref', 'dcour', 'devt', 'objet', 'type', 'service', 'service2', 'service_final', 'urgence', 'cat', 'signataire', 'sign', 'mode', 'lie', 'refliee', 'echeance', 'resume', 'action', 'obs'];
+  const champsSauvables = ['contact', 'ct-type', 'struct_int', 'contact_personne', 'ref', 'dcour', 'devt', 'objet', 'type', 'service', 'service2', 'service_final', 'urgence', 'cat', 'signataire', 'sign', 'mode', 'lie', 'refliee', 'echeance', 'resume', 'action', 'obs'];
   const sauverBrouillon = () => { try { const d = {}; champsSauvables.forEach((id) => { const el = vue.querySelector('#' + id); if (el) d[id] = el.value; }); d.conf = vue.querySelector('#conf').checked; d.lecture = lecture; d.fichierNom = fichier?.name || null; d.scanTemp = scanTemp; d.quand = Date.now(); localStorage.setItem(CLE_BROUILLON, JSON.stringify(d)); } catch (e) { /* ignore */ } };
   const effacerBrouillon = () => { try { localStorage.removeItem(CLE_BROUILLON); } catch (e) { /* ignore */ } };
   window.__effacerBrouillon = effacerBrouillon;
@@ -510,6 +523,7 @@ async function vueEnregistrer(sens, existant = null) {
     const b = JSON.parse(localStorage.getItem(CLE_BROUILLON) || 'null');
     if (b && (b.scanTemp || Object.values(b).some((v) => typeof v === 'string' && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)))) {
       champsSauvables.forEach((id) => { const el = vue.querySelector('#' + id); if (el && b[id] !== undefined && id !== 'service2') el.value = b[id]; });
+      majCorrespondant(b['ct-type'] || 'externe');
       if (b.service) { selSrv.value = b.service; majSousListe(b.service_final && b.service_final !== b.service ? b.service_final : null); }
       vue.querySelector('#conf').checked = !!b.conf; if (b.lecture) lecture = b.lecture; if (selSign) selSign.dispatchEvent(new Event('change'));
       const bando = document.createElement('div'); bando.className = 'bandeau ambre'; bando.style.marginBottom = '4px';
@@ -603,7 +617,18 @@ async function vueEnregistrer(sens, existant = null) {
     }
     if (ch.service_a_creer && !ch.service && estArr) { const srvSel = vue.querySelector('#service'); const opt = document.createElement('option'); opt.value = '__nouveau__'; opt.textContent = `Créer : ${ch.service_a_creer}`; opt.dataset.nom = ch.service_a_creer; srvSel.appendChild(opt); srvSel.value = '__nouveau__'; marquer('service', 'verif'); }
     const mettre = (id, val) => { if (val === undefined || val === null || val === '') return; const el = vue.querySelector('#' + id); if (!el) return; el.value = val; marquer(id, av.has(id) ? 'verif' : 'ok'); };
-    mettre('contact', ch.contact);
+    if (ch.contact) {
+      const n = normaliser(ch.organisme || ch.contact);
+      const svc = etat.services.find((x) => x.code !== 'EGAD' && n.includes(normaliser(x.nom)) && x.nom.length > 8);
+      if (svc) { majCorrespondant('interne'); vue.querySelector('#struct_int').value = svc.id; marquer('struct_int', av.has('contact') ? 'verif' : 'ok'); const reste = ch.contact.replace(new RegExp(svc.nom, 'i'), '').replace(/^[\s,·-]+|[\s,·-]+$/g, ''); if (reste.length > 3) vue.querySelector('#contact_personne').value = reste; }
+      else {
+        majCorrespondant('externe');
+        // on sépare la structure (organisme) de la personne (Madame/Monsieur…)
+        if (ch.organisme) { mettre('contact', ch.organisme.charAt(0).toUpperCase() + ch.organisme.slice(1)); if (ch.personne) vue.querySelector('#contact_personne').value = ch.personne; if (ch.personne && ch.organisme.length < 12) marquer('contact', 'verif'); }
+        else if (ch.personne) { vue.querySelector('#contact_personne').value = ch.personne; marquer('contact', 'verif'); }
+        else mettre('contact', ch.contact);
+      }
+    }
     if (!estArr && ch.reference) { const m = String(ch.reference).match(/N[°º]?\s*([0-9]{1,5})?\s*\//i); const num = m && m[1] ? m[1] : ''; if (num) mettre('ref', num); else { marquer('ref', 'verif'); vue.querySelector('#ref').placeholder = 'numéro illisible : saisir'; } }
     else mettre('ref', ch.reference); if (estArr) mettre('dcour', ch.date_courrier); else if (ch.date_courrier) { mettre('devt', ch.date_courrier); marquer('devt', av.has('dcour') ? 'verif' : 'ok'); }
     mettre('objet', ch.objet); mettre('resume', ch.resume); mettre('action', ch.action_demandee); mettre('echeance', ch.echeance);
@@ -620,12 +645,17 @@ async function vueEnregistrer(sens, existant = null) {
 
   const enregistrer = async (statutFinal) => {
     const v = (id) => vue.querySelector('#' + id)?.value?.trim() || null;
-    if (!v('contact') || !v('objet')) return toast("L'expéditeur et l'objet sont obligatoires.", true);
+    const corrType = v('ct-type') || 'externe';
+    const structInt = corrType === 'interne' ? etat.services.find((x) => x.id === v('struct_int')) : null;
+    if (corrType === 'interne' && !structInt) return toast('Choisissez la structure interne.', true);
+    if (corrType === 'externe' && !v('contact')) return toast('Indiquez la structure externe (ministère, partenaire…).', true);
+    if (!v('objet')) return toast("L'objet est obligatoire.", true);
+    const contactNom = corrType === 'interne' ? (structInt.nom_complet || structInt.nom) + (v('contact_personne') ? ' · ' + v('contact_personne') : '') : v('contact') + (v('contact_personne') ? ' · ' + v('contact_personne') : '');
     const bb = vue.querySelector('#bbrouillon'), bv = vue.querySelector('#bvalider'); bb.disabled = bv.disabled = true;
     try {
       // contact
-      let contact_id = null; const { data: cx } = await sb.from('contacts').select('id').ilike('nom', v('contact')).maybeSingle();
-      if (cx) contact_id = cx.id; else { const { data: nc } = await sb.from('contacts').insert({ nom: v('contact') }).select('id').single(); contact_id = nc?.id; }
+      let contact_id = null;
+      if (corrType === 'externe') { const { data: cx } = await sb.from('contacts').select('id').ilike('nom', v('contact')).maybeSingle(); if (cx) contact_id = cx.id; else { const { data: nc } = await sb.from('contacts').insert({ nom: v('contact') }).select('id').single(); contact_id = nc?.id; } }
       let serviceId = v('service_final') || v('service');
       let numeroCourrier = v('ref');
       if (!estArr && numeroCourrier) { numeroCourrier = numeroCourrier.replace(/^n[°º]?\s*/i, '').split('/')[0].trim(); numeroCourrier = `N° ${numeroCourrier}${SUFFIXE_DEPART}`; }
@@ -635,7 +665,7 @@ async function vueEnregistrer(sens, existant = null) {
       if (!estArr && sigObj?.interimaire && !v('sign')) { toast("Indiquez le nom de l'intérimaire.", true); bb.disabled = bv.disabled = false; return; }
       const signataireTexte = sigObj ? (sigObj.interimaire ? `${v('sign')} (intérimaire)` : sigObj.fonction + (sigObj.nom ? ' · ' + sigObj.nom : '')) : null;
       const ligne = {
-        sens, statut: statutFinal, contact_id, contact_nom: v('contact'), reference_externe: numeroCourrier, date_courrier: estArr ? v('dcour') : (v('devt') || aujourdhui()), date_evenement: v('devt') || aujourdhui(),
+        sens, statut: statutFinal, contact_id, contact_nom: contactNom, correspondant_type: corrType, structure_interne_id: structInt?.id || null, structure_externe: corrType === 'externe' ? v('contact') : null, contact_personne: v('contact_personne'), reference_externe: numeroCourrier, date_courrier: estArr ? v('dcour') : (v('devt') || aujourdhui()), date_evenement: v('devt') || aujourdhui(),
         annee: Number((v('devt') || aujourdhui()).slice(0, 4)), objet: v('objet'), type_id: v('type'), service_id: serviceId, urgence: v('urgence') || 'normal', categorie_id: v('cat'),
         signataire: signataireTexte, signataire_id: sigObj?.id || null, mode_envoi: v('mode'), reference_liee: v('refliee'), courrier_lie_id: v('lie'), echeance: v('echeance'), confidentiel: vue.querySelector('#conf').checked, resume: v('resume'), action_demandee: v('action'),
         observations: v('obs'), cree_par: etat.profil.id, lecture_auto: lecture, lecture_auto_le: lecture ? new Date().toISOString() : null,
@@ -734,7 +764,7 @@ async function vueCourrier(id) {
     <section class="carte span2">
       <div class="tete"><h2>Fiche du registre</h2><span style="font-size:12px;color:var(--muet)">Enregistré le ${fmtDateHeure(c.cree_le)}</span></div>
       <dl class="fiche grille2" style="margin:0">
-        ${champ(estArr ? 'Expéditeur' : 'Destinataire', esc(c.contact_nom))}${champ('Numéro du courrier', esc(c.reference_externe))}
+        ${champ(estArr ? 'Expéditeur' : 'Destinataire', `${c.correspondant_type === 'interne' ? '<span class="chip vert" style="margin-right:6px">Interne</span>' : '<span class="chip gris" style="margin-right:6px">Externe</span>'}${esc(c.correspondant_type === 'interne' ? (c.structure_interne_nom || c.contact_nom) : (c.structure_externe || c.contact_nom))}${c.contact_personne ? `<br><span style="color:var(--ink-soft)">${esc(c.contact_personne)}</span>` : ''}`)}${champ('Numéro du courrier', esc(c.reference_externe))}
         ${estArr ? champ('Date du courrier', fmtDate(c.date_courrier)) + champ('Date de réception', fmtDate(c.date_evenement)) : champ("Date d'envoi", fmtDate(c.date_evenement)) + champ("Date d'enregistrement", fmtDate(c.date_enregistrement || c.cree_le))}
         ${champ('Type', esc(c.type_nom))}${champ(estArr ? 'Destinataire interne' : 'Service émetteur', esc(c.service_nom_complet || c.service_nom))}
         ${champ('Catégorie', esc(c.categorie_nom))}${champ('Urgence', URGENCES[c.urgence])}

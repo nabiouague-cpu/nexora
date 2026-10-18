@@ -190,6 +190,7 @@ export function analyserTexte(texteBrut, contexte, meta = {}) {
 
   // --- En-tête de l'ENA elle-même → c'est un courrier qui part (ou interne)
   const enaEmet = /ecole nationale d administration|\bena\b/.test(normaliser(enTeteTexte.slice(0, 400)));
+  const sensEffectifInit = enaEmet ? 'depart' : sens;
   if (enaEmet && sens === 'arrivee') { champs.sens_suggere = 'depart'; indices.push("en-tête de l'ENA : ce courrier semble être un départ"); }
   const serviceEmetteur = enaEmet ? serviceDansTexte(enTeteTexte, services) : null;
 
@@ -213,7 +214,15 @@ export function analyserTexte(texteBrut, contexte, meta = {}) {
       if (candidat) { champs.contact = candidat.replace(/\s{2,}/g, ' ').replace(/[.,;:]+$/, '').trim(); if (!fiable) a_verifier.push('contact'); }
     }
   }
-  const appris = champs.contact ? apprentissage.find((a) => a.cle === normaliser(champs.contact)) : null;
+  // Organisme (structure) distinct de la personne
+  if (champs.contact) {
+    const mP = champs.contact.match(/^(.*?)(?:\s*[,·-]\s*)?((?:madame|monsieur|mme|m\.|mr|mademoiselle|son excellence)\b.*)$/i);
+    if (mP) { if (mP[1].trim().length > 3) champs.organisme = mP[1].trim(); champs.personne = mP[2].trim(); }
+    else champs.organisme = champs.contact;
+    // pour un départ, l'organisme du destinataire est souvent dans les lignes qui suivent la personne (ex. "de la filière…", "Ministère…")
+    if (!champs.organisme && (enaEmet || sensEffectifInit === 'depart')) { const mOrg = champs.contact.match(/(?:de la|du|de l'|des)\s+(.{6,80})$/i); if (mOrg) champs.organisme = mOrg[1].replace(/^(?:filière|direction|service)\s+/i, (x) => x).trim(); }
+  }
+  const appris = champs.contact ? apprentissage.find((a) => a.cle === normaliser(champs.organisme || champs.contact)) : null;
 
   // --- Références : la nôtre (N° …/ENA/…) et celle du courrier auquel on répond (Réf : V/L n° …)
   const mRefLiee = texte.match(/réf(?:érence)?\.?\s*:?\s*(?:v\/l|votre lettre|votre courrier|v\/c)?\s*n?[°º]?\s*:?\s*([A-Z0-9][A-Z0-9\/\-._ ]{3,40}?)(?:\s+du\s+([^\n]{6,30}))?(?=\n|$)/im);
