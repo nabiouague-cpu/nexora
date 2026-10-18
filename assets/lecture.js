@@ -222,6 +222,11 @@ export function analyserTexte(texteBrut, contexte, meta = {}) {
     // pour un départ, l'organisme du destinataire est souvent dans les lignes qui suivent la personne (ex. "de la filière…", "Ministère…")
     if (!champs.organisme && (enaEmet || sensEffectifInit === 'depart')) { const mOrg = champs.contact.match(/(?:de la|du|de l'|des)\s+(.{6,80})$/i); if (mOrg) champs.organisme = mOrg[1].replace(/^(?:filière|direction|service)\s+/i, (x) => x).trim(); }
   }
+  if (champs.organisme && !enaEmet) {
+    const idx = enTete.findIndex((l) => normaliser(l).includes(normaliser(champs.organisme).split(' ').slice(0, 3).join(' ')));
+    const suiv = idx >= 0 ? enTete.slice(idx + 1, idx + 4).find((l) => /^(?:direction|service|cabinet|secr[ée]tariat|cellule|d[ée]partement|inspection|bureau|division|sous-direction)\b/i.test(l.trim()) || /^d\.?[a-z]{1,4}$/i.test(l.trim())) : null;
+    if (suiv) champs.service_provenance = suiv.replace(/\s{2,}/g, ' ').replace(/[.…]+$/, '').trim();
+  }
   const appris = champs.contact ? apprentissage.find((a) => a.cle === normaliser(champs.organisme || champs.contact)) : null;
 
   // --- Références : la nôtre (N° …/ENA/…) et celle du courrier auquel on répond (Réf : V/L n° …)
