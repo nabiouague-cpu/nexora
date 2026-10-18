@@ -102,6 +102,7 @@ async function chargerProfil() {
     sb.from('signataires').select('*').eq('actif', true).order('ordre'),
   ]);
   etat.services = s.data || []; etat.types = t.data || []; etat.categories = k.data || []; etat.signataires = g.data || [];
+  try { const { data: pr } = await sb.from('parametres').select('cle,valeur'); etat.params = {}; (pr || []).forEach((x) => { etat.params[x.cle] = x.valeur; }); } catch (e) { etat.params = {}; }
 }
 
 function vueConnexion(message = '') {
@@ -153,7 +154,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-019';
+const APP_VERSION = '2026-10-18-020';
 const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
@@ -260,6 +261,7 @@ async function router() {
       case 'arrivees': return await vueRegistre('arrivee');
       case 'departs': return await vueRegistre('depart');
       case 'enregistrer': return await vueEnregistrer(param === 'depart' ? 'depart' : 'arrivee');
+      case 'modifier': { const { data: cx } = await sb.from('courriers').select('*').eq('id', param).maybeSingle(); if (!cx) return naviguer('#/tableau'); return await vueEnregistrer(cx.sens, cx); }
       case 'courrier': return await vueCourrier(param);
       case 'agenda': return await vueAgenda(param);
       case 'archives': return await vueArchives();
@@ -270,7 +272,7 @@ async function router() {
   } catch (err) { console.error(err); toast('Erreur : ' + (err.message || err), true); }
 }
 window.addEventListener('hashchange', router);
-window.addEventListener('beforeunload', (e) => { if (/#\/enregistrer/.test(location.hash) && document.querySelector('#ffiche') && [...document.querySelectorAll('#ffiche input, #ffiche textarea')].some((i) => i.value && i.type !== 'date')) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', (e) => { if (/#\/(enregistrer|modifier)/.test(location.hash) && document.querySelector('#ffiche') && [...document.querySelectorAll('#ffiche input, #ffiche textarea')].some((i) => i.value && i.type !== 'date')) { e.preventDefault(); e.returnValue = ''; } });
 
 // ------------------------------------------------------------------
 // Tableau de bord
@@ -324,7 +326,7 @@ async function vueTableau() {
 
 function tableCourriers(liste, cols) {
   if (!liste.length) return `<div class="vide">Aucun courrier.</div>`;
-  const entetes = { numero: "N° d'ordre", date: 'Date', contact: 'Expéditeur / Destinataire', objet: 'Objet', type: 'Type', service: 'Service', echeance: 'Échéance', statut: 'Statut', scan: 'Scan' };
+  const entetes = { numero: "N° d'ordre", date: 'Envoyé / Reçu le', contact: 'Expéditeur / Destinataire', objet: 'Objet', type: 'Type', service: 'Service', echeance: 'Échéance', statut: 'Statut', scan: 'Scan' };
   const cellule = (c, col) => {
     switch (col) {
       case 'numero': return `<td>${numero(c)}</td>`;
@@ -408,7 +410,7 @@ async function vueRegistre(sens) {
 
 function exporterExcel(liste, nomFichier) {
   const lignes = liste.map((c) => ({
-    'N° d\'ordre': c.numero_ordre, 'Sens': c.sens === 'arrivee' ? 'Arrivée' : 'Départ', 'Date': fmtDate(c.date_evenement), 'Date du courrier': fmtDate(c.date_courrier),
+    'N° d\'ordre': c.numero_ordre, 'Sens': c.sens === 'arrivee' ? 'Arrivée' : 'Départ', 'Date d\'envoi / réception': fmtDate(c.date_evenement), 'Date du courrier': fmtDate(c.date_courrier), 'Date d\'enregistrement': fmtDate(c.cree_le),
     'Numéro du courrier': c.reference_externe || '', 'En réponse à': c.reference_liee || '', 'Expéditeur / Destinataire': c.contact_nom, 'Objet': c.objet, 'Type': c.type_nom || '', 'Catégorie': c.categorie_nom || '',
     'Service': c.service_nom_complet || c.service_nom || '', 'Signataire': c.signataire || '', 'Mode d\'envoi': MODES[c.mode_envoi] || '', 'Urgence': URGENCES[c.urgence] || '', 'Échéance': fmtDate(c.echeance),
     'Statut': (STATUTS[c.statut] || [c.statut])[0], 'Résumé': c.resume || '', 'Action demandée': c.action_demandee || '', 'Observations': c.observations || '', 'Pièces jointes': c.nb_pieces || 0,
@@ -421,17 +423,17 @@ function exporterExcel(liste, nomFichier) {
 // ------------------------------------------------------------------
 // Enregistrer un courrier
 // ------------------------------------------------------------------
-async function vueEnregistrer(sens) {
+async function vueEnregistrer(sens, existant = null) {
   if (!peutEcrire()) return naviguer('#/tableau');
   const estArr = sens === 'arrivee';
   const vue = coque(estArr ? 'arrivees' : 'departs', '');
-  let fichier = null; let lecture = null;
+  let fichier = null; let lecture = existant?.lecture_auto || null;
   const opt = (liste, val) => liste.map((x) => `<option value="${x.id}" ${x.id === val ? 'selected' : ''}>${esc(x.nom)}</option>`).join('');
   const { data: arrivees } = estArr ? { data: [] } : await sb.from('courriers').select('id,numero_ordre,objet').eq('sens', 'arrivee').neq('statut', 'brouillon').order('cree_le', { ascending: false }).limit(200);
 
   vue.innerHTML = `
-  <header class="entete"><div class="titre"><div class="fil"><a href="#/${estArr ? 'arrivees' : 'departs'}" style="text-decoration:none">${estArr ? 'Arrivées' : 'Départs'}</a> · Nouvel enregistrement</div><h1>Enregistrer un courrier ${estArr ? 'arrivée' : 'départ'}</h1></div>
-    <div class="actions"><div class="seg" role="group" aria-label="Sens"><button type="button" class="${estArr ? 'on' : ''}" id="sa">Arrivée</button><button type="button" class="${estArr ? '' : 'on'}" id="sd">Départ</button></div><div id="etat-lecture"></div></div></header>
+  <header class="entete"><div class="titre"><div class="fil"><a href="#/${estArr ? 'arrivees' : 'departs'}" style="text-decoration:none">${estArr ? 'Arrivées' : 'Départs'}</a> · ${existant ? 'Modification de ' + esc(existant.numero_ordre || 'brouillon') : 'Nouvel enregistrement'}</div><h1>${existant ? 'Modifier le courrier ' + esc(existant.numero_ordre || '') : 'Enregistrer un courrier ' + (estArr ? 'arrivée' : 'départ')}</h1></div>
+    <div class="actions">${existant ? '' : `<div class="seg" role="group" aria-label="Sens"><button type="button" class="${estArr ? 'on' : ''}" id="sa">Arrivée</button><button type="button" class="${estArr ? '' : 'on'}" id="sd">Départ</button></div>`}<div id="etat-lecture"></div></div></header>
   <div style="display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:20px;align-items:start" class="deux-col">
     <section class="carte" aria-label="Document scanné">
       <div class="tete"><h2>Scan du courrier</h2></div>
@@ -446,8 +448,9 @@ async function vueEnregistrer(sens) {
       <div class="grille2">
         <div class="champ"><label for="contact">${estArr ? 'Expéditeur' : 'Destinataire'} <span id="d-contact"></span></label><input id="contact" required list="lcontacts"><datalist id="lcontacts"></datalist></div>
         <div class="champ"><label for="ref">Numéro du courrier <span id="d-ref"></span></label>${estArr ? `<input id="ref" placeholder="N° porté sur le courrier">` : `<div style="display:flex;align-items:center;gap:6px"><span style="color:var(--ink-soft)">N°</span><input id="ref" placeholder="027" inputmode="numeric" style="width:110px;flex:none;font-family:var(--font-mono)"><span id="ref-suffixe" style="font-family:var(--font-mono);font-size:13px;color:var(--ink);white-space:nowrap">${SUFFIXE_DEPART}</span></div><span class="aide">Saisissez seulement le numéro écrit sur le courrier ; le reste est ajouté automatiquement.</span>`}</div>
-        <div class="champ"><label for="dcour">Date du courrier <span id="d-dcour"></span></label><input id="dcour" type="date"></div>
-        <div class="champ"><label for="devt">${estArr ? 'Date de réception' : "Date d'envoi"}</label><input id="devt" type="date" value="${aujourdhui()}" required></div>
+        ${estArr ? `<div class="champ"><label for="dcour">Date du courrier <span id="d-dcour"></span></label><input id="dcour" type="date"><span class="aide">Date écrite par l'expéditeur.</span></div>
+        <div class="champ"><label for="devt">Date de réception</label><input id="devt" type="date" value="${aujourdhui()}" required></div>` : `<div class="champ"><label for="devt">Date d'envoi <span id="d-dcour"></span></label><input id="devt" type="date" required><span class="aide">Date portée sur le courrier (tampon dateur).</span><input type="hidden" id="dcour"></div>
+        <div class="champ"><label>Date d'enregistrement</label><div style="padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-2)">${fmtDate(new Date())}</div><span class="aide">Date de saisie dans NEXORA, automatique.</span></div>`}
         <div class="champ span2"><label for="objet">Objet <span id="d-objet"></span></label><input id="objet" required></div>
         <div class="champ"><label for="type">Type de courrier <span id="d-type"></span></label><select id="type"><option value="">—</option>${opt(etat.types.filter((t) => t.sens === 'les_deux' || t.sens === sens))}</select></div>
         ${estArr ? `<div class="champ"><label for="service">Destinataire interne <span id="d-service"></span></label>
@@ -465,7 +468,7 @@ async function vueEnregistrer(sens) {
       <div class="champ"><label for="action">Action demandée <span id="d-action"></span></label><input id="action" placeholder="Répondre, payer, assister, transmettre…"></div>
       <fieldset id="fevs" style="border:1px solid var(--bord);border-radius:12px;padding:14px 16px;margin:0;display:none;flex-direction:column;gap:10px"><legend style="font-size:13px;font-weight:600;padding:0 6px">Dates détectées · ajouter à l'agenda</legend></fieldset>
       <div class="champ"><label for="obs">Observations</label><input id="obs" placeholder="Remarque libre, instruction de la direction…"></div>
-      <div class="ligne-boutons"><button class="btn discret" type="button" id="bbrouillon">Enregistrer comme brouillon</button><button class="btn principal" type="submit" id="bvalider">Valider et attribuer le n° d'ordre</button></div>
+      <div class="ligne-boutons">${existant?.numero_ordre ? `<a class="btn discret" href="#/courrier/${existant.id}">Annuler les modifications</a><button class="btn principal" type="submit" id="bvalider">Enregistrer les modifications</button><button type="button" id="bbrouillon" hidden></button>` : `<button class="btn discret" type="button" id="bbrouillon">Enregistrer comme brouillon</button><button class="btn principal" type="submit" id="bvalider">Valider et attribuer le n° d'ordre</button>`}</div>
     </form>
   </div>
   <style>@media (max-width:980px){.deux-col{grid-template-columns:1fr !important}}</style>`;
@@ -482,10 +485,20 @@ async function vueEnregistrer(sens) {
     selSrv2.style.display = ''; srvFinal.value = sousId || d.id; if (!sousId) selSrv2.focus();
   };
   if (selSrv2) { selSrv.onchange = () => majSousListe(null); selSrv2.onchange = () => { srvFinal.value = selSrv2.value || selSrv.value; }; }
-  majSousListe(null);
-  vue.querySelector('#sa').onclick = () => naviguer('#/enregistrer/arrivee');
+  majSousListe(existant && estArr && etat.services.find((x) => x.id === existant.service_id)?.parent_id ? existant.service_id : null);
+  if (selSign && existant) selSign.dispatchEvent(new Event('change'));
+  if (vue.querySelector('#sa')) vue.querySelector('#sa').onclick = () => naviguer('#/enregistrer/arrivee');
   // --- Brouillon local : rien ne se perd tant que le formulaire n'est pas fermé volontairement
-  const CLE_BROUILLON = 'nexora_brouillon_' + sens;
+  const CLE_BROUILLON = 'nexora_brouillon_' + sens + (existant ? '_' + existant.id : '');
+  if (existant) {
+    const mettreV = (id, val) => { const el = vue.querySelector('#' + id); if (el && val != null) el.value = val; };
+    mettreV('contact', existant.contact_nom); mettreV('objet', existant.objet); mettreV('type', existant.type_id); mettreV('urgence', existant.urgence); mettreV('cat', existant.categorie_id);
+    mettreV('echeance', existant.echeance); mettreV('resume', existant.resume); mettreV('action', existant.action_demandee); mettreV('obs', existant.observations); mettreV('devt', existant.date_evenement);
+    if (estArr) { mettreV('dcour', existant.date_courrier); const srv = etat.services.find((x) => x.id === existant.service_id); if (srv) { mettreV('service', srv.parent_id || srv.id); } }
+    else { const m = String(existant.reference_externe || '').match(/N[°º]?\s*([^\/\s]+)/i); mettreV('ref', m ? m[1] : ''); mettreV('mode', existant.mode_envoi); mettreV('lie', existant.courrier_lie_id); mettreV('refliee', existant.reference_liee); mettreV('signataire', existant.signataire_id); if (existant.signataire && /\(intérimaire\)/.test(existant.signataire)) mettreV('sign', existant.signataire.replace(/\s*\(intérimaire\)/, '')); }
+    if (estArr) mettreV('ref', existant.reference_externe);
+    vue.querySelector('#conf').checked = !!existant.confidentiel;
+  }
   const champsSauvables = ['contact', 'ref', 'dcour', 'devt', 'objet', 'type', 'service', 'service2', 'service_final', 'urgence', 'cat', 'signataire', 'sign', 'mode', 'lie', 'refliee', 'echeance', 'resume', 'action', 'obs'];
   const sauverBrouillon = () => { try { const d = {}; champsSauvables.forEach((id) => { const el = vue.querySelector('#' + id); if (el) d[id] = el.value; }); d.conf = vue.querySelector('#conf').checked; d.lecture = lecture; d.fichierNom = fichier?.name || null; d.scanTemp = scanTemp; d.quand = Date.now(); localStorage.setItem(CLE_BROUILLON, JSON.stringify(d)); } catch (e) { /* ignore */ } };
   const effacerBrouillon = () => { try { localStorage.removeItem(CLE_BROUILLON); } catch (e) { /* ignore */ } };
@@ -507,7 +520,7 @@ async function vueEnregistrer(sens) {
   } catch (e) { /* ignore */ }
   const reprise = sessionStorage.getItem('nexora_lecture');
   if (reprise) { sessionStorage.removeItem('nexora_lecture'); try { const { lecture: r, nom } = JSON.parse(reprise); lecture = r; setTimeout(() => { appliquerLecture(r); vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau vert">${ICONES.ok}Lecture reprise (${esc(nom || 'document')}) · pensez à rattacher à nouveau le scan</div>`; }, 50); } catch (e) { /* ignore */ } }
-  vue.querySelector('#sd').onclick = () => naviguer('#/enregistrer/depart');
+  if (vue.querySelector('#sd')) vue.querySelector('#sd').onclick = () => naviguer('#/enregistrer/depart');
   // contacts pour l'autocomplétion
   sb.from('contacts').select('nom').order('nom').limit(500).then(({ data }) => { vue.querySelector('#lcontacts').innerHTML = (data || []).map((c) => `<option value="${esc(c.nom)}">`).join(''); });
 
@@ -551,7 +564,12 @@ async function vueEnregistrer(sens) {
     vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre">Lecture du document en cours…</div>`;
     try {
       const [{ data: contacts }, { data: apprentissage }] = await Promise.all([sb.from('contacts').select('nom').limit(2000), sb.from('apprentissage').select('*')]);
-      const data = await lireCourrier(fichier, { types: etat.types, services: etat.services, sens, contacts: contacts || [], apprentissage: apprentissage || [] }, (msg) => { vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre" data-lecture="1">${esc(msg)}</div>`; });
+      const progression = (msg) => { vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre" data-lecture="1">${esc(msg)}</div>`; };
+      let data = null;
+      if (etat.params?.ia_actif === '1') {
+        try { data = await lireAvecIA(fichier, sens, progression); } catch (e) { console.error(e); toast('Lecture IA indisponible (' + (e.message || e) + ') : lecture gratuite utilisée.', true); }
+      }
+      if (!data) data = await lireCourrier(fichier, { types: etat.types, services: etat.services, sens, contacts: contacts || [], apprentissage: apprentissage || [] }, progression);
       lecture = data; appliquerLecture(data);
       const n = Object.keys(data.champs || {}).length;
       vue.querySelector('#etat-lecture').innerHTML = n ? `<div class="bandeau vert" title="${esc((data.indices || []).join(' · '))}">${ICONES.ok}Lecture terminée · ${n} champs détectés${data.a_verifier?.length ? ` · ${data.a_verifier.length} à vérifier` : ''}${data.indices?.length ? ' · ' + esc(data.indices.join(' · ')) : ''}</div>` : `<div class="bandeau ambre">Aucun champ reconnu : le scan est peut-être trop flou. Remplissez la fiche à la main.</div>`;
@@ -561,7 +579,7 @@ async function vueEnregistrer(sens) {
     }
     blire.disabled = false; blire.innerHTML = `${ICONES.scan}Relancer la lecture automatique`;
   };
-  const fiableLecture = (r) => r.mode === 'pdf' || (r.confiance || 0) >= 85;
+  const fiableLecture = (r) => r.mode === 'pdf' || r.mode === 'ia' || (r.confiance || 0) >= 85;
   const marquer = (id, etatC) => { const ch = vue.querySelector('#' + id)?.closest('.champ'); if (!ch) return; ch.classList.remove('ok', 'verif'); ch.classList.add(etatC); const d = vue.querySelector('#d-' + id); if (d) d.innerHTML = etatC === 'ok' ? '<span class="lu-det">détecté</span>' : '<span class="lu-ver">à vérifier</span>'; };
   const appliquerLecture = async (r) => {
     const ch = r.champs || {}; const av = new Set(r.a_verifier || []);
@@ -590,7 +608,8 @@ async function vueEnregistrer(sens) {
     const mettre = (id, val) => { if (val === undefined || val === null || val === '') return; const el = vue.querySelector('#' + id); if (!el) return; el.value = val; marquer(id, av.has(id) ? 'verif' : 'ok'); };
     mettre('contact', ch.contact);
     if (!estArr && ch.reference) { const m = String(ch.reference).match(/N[°º]?\s*([0-9]{1,5})?\s*\//i); const num = m && m[1] ? m[1] : ''; if (num) mettre('ref', num); else { marquer('ref', 'verif'); vue.querySelector('#ref').placeholder = 'numéro illisible : saisir'; } }
-    else mettre('ref', ch.reference); mettre('dcour', ch.date_courrier); mettre('objet', ch.objet); mettre('resume', ch.resume); mettre('action', ch.action_demandee); mettre('echeance', ch.echeance);
+    else mettre('ref', ch.reference); if (estArr) mettre('dcour', ch.date_courrier); else if (ch.date_courrier) { mettre('devt', ch.date_courrier); marquer('devt', av.has('dcour') ? 'verif' : 'ok'); }
+    mettre('objet', ch.objet); mettre('resume', ch.resume); mettre('action', ch.action_demandee); mettre('echeance', ch.echeance);
     if (ch.urgence && URGENCES[ch.urgence]) mettre('urgence', ch.urgence);
     const typ = etat.types.find((t) => t.nom.toLowerCase() === String(ch.type || '').toLowerCase()); if (typ) mettre('type', typ.id);
     const srv = etat.services.find((s) => s.nom.toLowerCase() === String(ch.service || '').toLowerCase());
@@ -619,19 +638,25 @@ async function vueEnregistrer(sens) {
       if (!estArr && sigObj?.interimaire && !v('sign')) { toast("Indiquez le nom de l'intérimaire.", true); bb.disabled = bv.disabled = false; return; }
       const signataireTexte = sigObj ? (sigObj.interimaire ? `${v('sign')} (intérimaire)` : sigObj.fonction + (sigObj.nom ? ' · ' + sigObj.nom : '')) : null;
       const ligne = {
-        sens, statut: statutFinal, contact_id, contact_nom: v('contact'), reference_externe: numeroCourrier, date_courrier: v('dcour'), date_evenement: v('devt') || aujourdhui(),
+        sens, statut: statutFinal, contact_id, contact_nom: v('contact'), reference_externe: numeroCourrier, date_courrier: estArr ? v('dcour') : (v('devt') || aujourdhui()), date_evenement: v('devt') || aujourdhui(),
         annee: Number((v('devt') || aujourdhui()).slice(0, 4)), objet: v('objet'), type_id: v('type'), service_id: serviceId, urgence: v('urgence') || 'normal', categorie_id: v('cat'),
         signataire: signataireTexte, signataire_id: sigObj?.id || null, mode_envoi: v('mode'), reference_liee: v('refliee'), courrier_lie_id: v('lie'), echeance: v('echeance'), confidentiel: vue.querySelector('#conf').checked, resume: v('resume'), action_demandee: v('action'),
         observations: v('obs'), cree_par: etat.profil.id, lecture_auto: lecture, lecture_auto_le: lecture ? new Date().toISOString() : null,
       };
-      const { data: c, error } = await sb.from('courriers').insert(ligne).select('*').single(); if (error) throw error;
+      let c;
+      if (existant) {
+        const maj = { ...ligne }; delete maj.cree_par; delete maj.sens; if (existant.statut !== 'brouillon') delete maj.statut; else maj.statut = statutFinal;
+        const { data: cm, error } = await sb.from('courriers').update(maj).eq('id', existant.id).select('*').single(); if (error) throw error; c = cm;
+      } else {
+        const { data: ci, error } = await sb.from('courriers').insert(ligne).select('*').single(); if (error) throw error; c = ci;
+      }
       if (statutFinal !== 'brouillon') apprendre(c).catch(() => {});
       if (statutFinal !== 'brouillon' && c.sens === 'depart' && c.courrier_lie_id) sb.from('courriers').update({ statut: 'traite' }).eq('id', c.courrier_lie_id).in('statut', ['recu', 'transmis', 'a_traiter']).then(() => {});
       // scan : déplacé du dossier temporaire vers le dossier définitif du courrier
       if (scanTemp?.chemin || fichier) {
         const d = new Date(c.date_evenement); const nom = scanTemp?.nom || fichier.name; const type = scanTemp?.type || fichier.type; const taille = scanTemp?.taille || fichier.size;
         const ext = (nom.split('.').pop() || 'pdf').toLowerCase();
-        const chemin = `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${sens === 'arrivee' ? 'arrivees' : 'departs'}/${c.id}/scan.${ext}`;
+        const chemin = `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${sens === 'arrivee' ? 'arrivees' : 'departs'}/${c.id}/${existant ? 'scan-' + Date.now() : 'scan'}.${ext}`;
         let ok = false;
         if (scanTemp?.chemin) { const { error: em } = await sb.storage.from('courriers').move(scanTemp.chemin, chemin); ok = !em; }
         if (!ok) { if (!fichier) throw new Error('Scan introuvable : choisissez le fichier à nouveau.'); const { error: eu } = await sb.storage.from('courriers').upload(chemin, fichier, { contentType: type, upsert: true }); if (eu) throw eu; }
@@ -640,17 +665,33 @@ async function vueEnregistrer(sens) {
       // événements détectés
       const cases = [...vue.querySelectorAll('[data-ev]:checked')];
       for (const cb of cases) { const e = (lecture?.evenements || [])[Number(cb.dataset.ev)]; if (e) await creerEvenement({ courrier_id: c.id, titre: e.titre, type: e.type || 'echeance', debut: e.debut, fin: e.fin || null, lieu: e.lieu || null, description: e.description || null }); }
-      if (statutFinal !== 'brouillon' && c.echeance) {
-        const dejaCouvert = cases.some((cb) => (lecture?.evenements || [])[Number(cb.dataset.ev)]?.debut?.slice(0, 10) === c.echeance);
+      if (statutFinal !== 'brouillon' && c.echeance && (!existant || existant.echeance !== c.echeance)) {
+        let dejaCouvert = cases.some((cb) => (lecture?.evenements || [])[Number(cb.dataset.ev)]?.debut?.slice(0, 10) === c.echeance);
+        if (existant) { const { data: evx } = await sb.from('evenements').select('id').eq('courrier_id', c.id).gte('debut', c.echeance + 'T00:00:00').lte('debut', c.echeance + 'T23:59:59').limit(1); if (evx?.length) dejaCouvert = true; }
         if (!dejaCouvert) await creerEvenement({ courrier_id: c.id, titre: `Échéance · ${c.objet}`.slice(0, 120), type: 'echeance', debut: c.echeance + 'T08:00:00', description: `Alerte automatique : échéance du courrier ${c.numero_ordre || ''}`.trim() }, [2]);
       }
       effacerBrouillon();
-      toast(statutFinal === 'brouillon' ? 'Brouillon enregistré.' : `Courrier enregistré sous le n° ${c.numero_ordre}.`);
+      toast(existant ? 'Modifications enregistrées.' : statutFinal === 'brouillon' ? 'Brouillon enregistré.' : `Courrier enregistré sous le n° ${c.numero_ordre}.`);
       naviguer('#/courrier/' + c.id);
     } catch (err) { console.error(err); toast('Enregistrement impossible : ' + (err.message || err), true); bb.disabled = bv.disabled = false; }
   };
   vue.querySelector('#ffiche').onsubmit = (e) => { e.preventDefault(); enregistrer(estArr ? 'recu' : 'envoye'); };
   vue.querySelector('#bbrouillon').onclick = () => enregistrer('brouillon');
+}
+
+// Lecture par l'IA (fonction serveur lire-courrier-ia) : même format de résultat que le lecteur gratuit
+async function lireAvecIA(fichier, sens, progression) {
+  progression?.("Lecture par l'IA en cours…");
+  const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(fichier); });
+  const { data, error } = await sb.functions.invoke('lire-courrier-ia', { body: { fichier_b64: b64, type_mime: fichier.type, sens, types: etat.types.map((t) => t.nom), services: etat.services.filter((x) => x.code !== 'EGAD').map((x) => x.nom), signataires: (etat.signataires || []).map((g) => g.fonction) } });
+  if (error) throw new Error(error.message || 'erreur réseau'); if (data?.erreur) throw new Error(data.erreur);
+  const ch = data.champs || {};
+  const champs = { contact: ch.contact, reference: ch.numero ? (ch.numero_court ? `N° ${ch.numero_court}/${String(ch.numero).replace(/^N[°º]?\s*/i, '').split('/').slice(1).join('/')}` : `N° ${String(ch.numero).replace(/^N[°º]?\s*/i, '')}`) : (ch.numero_court ? `N° ${ch.numero_court}/x` : null), reference_liee: ch.reference_liee, date_courrier: ch.date_courrier, objet: ch.objet, type: ch.type, service: ch.service, fonction_signataire: ch.fonction_signataire, signataire: ch.signataire_nom, urgence: ch.urgence, resume: ch.resume, action_demandee: ch.action_demandee, echeance: ch.echeance, montant: ch.montant, sens_suggere: ch.sens_detecte && ch.sens_detecte !== sens ? ch.sens_detecte : undefined };
+  Object.keys(champs).forEach((k) => { if (champs[k] == null) delete champs[k]; });
+  const corr = { numero: 'ref', numero_court: 'ref', contact: 'contact', date_courrier: 'dcour', objet: 'objet', service: 'service', echeance: 'echeance' };
+  const a_verifier = (ch.a_verifier || []).map((k) => corr[k] || k);
+  const u = data.usage || {};
+  return { champs, a_verifier, evenements: (ch.evenements || []).filter((e) => e && e.debut), indices: [`lu par l'IA (${data.modele || 'Claude'})`, u.input_tokens ? `${u.input_tokens + (u.output_tokens || 0)} unités` : null].filter(Boolean), mode: 'ia', confiance: 95, pages: 1, texte_brut: null };
 }
 
 // Apprentissage : NEXORA retient ce que la secrétaire associe à un expéditeur (type, service, catégorie, urgence)
@@ -691,13 +732,13 @@ async function vueCourrier(id) {
   vue.innerHTML = `
   <header class="entete"><div class="titre"><div class="fil"><a href="#/${estArr ? 'arrivees' : 'departs'}" style="text-decoration:none">${estArr ? 'Arrivées' : 'Départs'}</a> · ${c.numero_ordre || 'Brouillon'}</div><h1 style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">${esc(c.numero_ordre || 'Brouillon')} ${chipStatut(c)}${c.confidentiel ? '<span class="chip corail">Confidentiel</span>' : ''}</h1><div style="font-size:15px;margin-top:4px">${esc(c.objet)}</div></div>
     <div class="actions">${peutEcrire() && c.statut !== 'annule' ? `${c.statut === 'brouillon' ? `<button class="btn principal" id="bvalider">Valider et attribuer le n°</button>` : `<select id="sstatut" class="filtre-select" aria-label="Changer le statut">${statutsPossibles.map((s) => `<option value="${s}" ${c.statut === s ? 'selected' : ''}>${STATUTS[s][0]}</option>`).join('')}</select>`}
-      ${estArr && c.statut !== 'brouillon' ? `<a class="btn vert" href="#/enregistrer/depart">Répondre (départ)</a>` : ''}<button class="btn danger" id="bannuler">Annuler</button>` : ''}</div></header>
+      <a class="btn" href="#/modifier/${c.id}">Modifier</a>${estArr && c.statut !== 'brouillon' ? `<a class="btn vert" href="#/enregistrer/depart">Répondre (départ)</a>` : ''}<button class="btn danger" id="bannuler">Annuler le courrier</button>` : ''}</div></header>
   <div class="grille3">
     <section class="carte span2">
       <div class="tete"><h2>Fiche du registre</h2><span style="font-size:12px;color:var(--muet)">Enregistré le ${fmtDateHeure(c.cree_le)}</span></div>
       <dl class="fiche grille2" style="margin:0">
         ${champ(estArr ? 'Expéditeur' : 'Destinataire', esc(c.contact_nom))}${champ('Numéro du courrier', esc(c.reference_externe))}
-        ${champ('Date du courrier', fmtDate(c.date_courrier))}${champ(estArr ? 'Date de réception' : "Date d'envoi", fmtDate(c.date_evenement))}
+        ${estArr ? champ('Date du courrier', fmtDate(c.date_courrier)) + champ('Date de réception', fmtDate(c.date_evenement)) : champ("Date d'envoi", fmtDate(c.date_evenement)) + champ("Date d'enregistrement", fmtDate(c.cree_le))}
         ${champ('Type', esc(c.type_nom))}${champ(estArr ? 'Destinataire interne' : 'Service émetteur', esc(c.service_nom_complet || c.service_nom))}
         ${champ('Catégorie', esc(c.categorie_nom))}${champ('Urgence', URGENCES[c.urgence])}
         ${estArr ? '' : champ('Signataire', esc(c.signataire || c.signataire_fonction)) + champ("Mode d'envoi", MODES[c.mode_envoi])}
@@ -933,6 +974,14 @@ async function vueParametres() {
       ${gere ? `<form id="fcat" style="display:flex;gap:8px;margin-top:6px;align-items:flex-end"><div class="champ" style="flex:1"><label for="knom">Nouvelle catégorie</label><input id="knom" placeholder="Ex. Scolarité" required></div><button class="btn petit principal" type="submit">${ICONES.plus}Ajouter</button></form>` : ''}
       <div style="font-size:12px;color:var(--muet)">Un élément désactivé disparaît des listes mais reste sur les courriers déjà enregistrés.</div></section>
   </div>
+  <section class="carte"><div class="tete"><h2>Lecture automatique par l'IA</h2><span class="chip ${etat.params?.ia_actif === '1' ? 'vert' : 'gris'}">${etat.params?.ia_actif === '1' ? 'Activée' : 'Désactivée'}</span></div>
+    <div style="font-size:13px;color:var(--ink-soft)">Par défaut, NEXORA lit les scans avec un lecteur gratuit intégré (texte et OCR). En activant l'IA (Claude), le courrier est compris comme par une personne : résumé rédigé, action demandée complète avec la liste des pièces, dates et écriture manuscrite mieux lues. Coût : une fraction de centime par courrier avec Haiku. La clé reste sur le serveur et n'est jamais affichée.</div>
+    ${gere ? `<form id="fia" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="ia_actif" ${etat.params?.ia_actif === '1' ? 'checked' : ''} style="width:18px;height:18px"> Activer la lecture par l'IA</label>
+      <div class="champ"><label for="ia_modele">Modèle</label><select id="ia_modele">${[['claude-haiku-5-5', 'Claude Haiku 5.5 — le plus économique'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5 — plus précis'], ['claude-opus-5-5', 'Claude Opus 5.5 — le plus puissant']].map(([v, l]) => `<option value="${v}" ${(etat.params?.ia_modele || 'claude-haiku-5-5') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="champ" style="flex:1 1 260px"><label for="ia_cle">Clé API Anthropic ${etat.params?.ia_cle ? '<span class="lu-det">clé enregistrée</span>' : ''}</label><input id="ia_cle" type="password" placeholder="${etat.params?.ia_cle ? 'Laisser vide pour conserver la clé actuelle' : 'sk-ant-…'}" autocomplete="off"></div>
+      <button class="btn petit principal" type="submit">Enregistrer</button></form>` : ''}
+  </section>
   <section class="carte"><div class="tete"><h2>Signataires des courriers départ</h2><span class="chip gris">${(etat.signataires || []).length}</span></div>
     <div style="font-size:12px;color:var(--ink-soft)">Indiquez le nom de la personne en poste pour chaque fonction ; il apparaîtra dans le registre et les rapports.</div>
     ${(etat.signataires || []).map((g) => `<form data-sig="${g.id}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;padding:8px 0;border-bottom:1px solid var(--bord-leger)"><div style="flex:1 1 320px;font-weight:600">${esc(g.fonction)}${g.interimaire ? ' <span class="chip ambre">nom saisi à chaque courrier</span>' : ''}</div>${g.interimaire ? '' : `<div class="champ" style="flex:1 1 220px"><label class="sr" for="sn-${g.id}">Nom</label><input id="sn-${g.id}" value="${esc(g.nom || '')}" placeholder="Nom et prénoms"></div><button class="btn petit" type="submit">Enregistrer</button>`}</form>`).join('')}
@@ -947,6 +996,13 @@ async function vueParametres() {
   </div>`;
 
   vue.querySelector('#bdec').onclick = () => sb.auth.signOut();
+  vue.querySelector('#fia')?.addEventListener('submit', async (e) => {
+    e.preventDefault(); const actif = vue.querySelector('#ia_actif').checked; const cle = vue.querySelector('#ia_cle').value.trim(); const modele = vue.querySelector('#ia_modele').value;
+    if (actif && !cle && !etat.params?.ia_cle) return toast('Saisissez la clé API pour activer la lecture IA.', true);
+    const lignes = [{ cle: 'ia_actif', valeur: actif ? '1' : '0' }, { cle: 'ia_modele', valeur: modele }]; if (cle) lignes.push({ cle: 'ia_cle', valeur: cle });
+    const { error } = await sb.from('parametres').upsert(lignes.map((l) => ({ ...l, modifie_le: new Date().toISOString() }))); if (error) return toast(error.message, true);
+    await chargerProfil(); toast(actif ? 'Lecture IA activée.' : 'Lecture IA désactivée.'); router();
+  });
   vue.querySelectorAll('form[data-sig]').forEach((f) => f.onsubmit = async (e) => { e.preventDefault(); const nom = f.querySelector('input')?.value.trim() || null; const { error } = await sb.from('signataires').update({ nom }).eq('id', f.dataset.sig); if (error) return toast(error.message, true); await chargerProfil(); toast('Signataire mis à jour.'); router(); });
   vue.querySelector('#fnom').onsubmit = async (e) => { e.preventDefault(); const nom = vue.querySelector('#pnom').value.trim(); if (!nom) return; const { error } = await sb.from('profils').update({ nom }).eq('id', p.id); if (error) return toast(error.message, true); etat.profil.nom = nom; toast('Nom enregistré.'); router(); };
   vue.querySelector('#fmdp').onsubmit = async (e) => { e.preventDefault(); if (vue.querySelector('#n1').value !== vue.querySelector('#n2').value) return toast('Les deux mots de passe diffèrent.', true); const { error } = await sb.auth.updateUser({ password: vue.querySelector('#n1').value }); if (error) return toast(error.message, true); toast('Mot de passe mis à jour.'); e.target.reset(); };
@@ -984,7 +1040,7 @@ async function verifierMiseAJour() {
       b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:60;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:10px 16px;background:#8C2F1F;color:#fff;font-size:14px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.2)';
       b.innerHTML = `<span>Une nouvelle version de NEXORA est disponible (v${esc(version)}).</span><button type="button" id="maj-btn" style="height:36px;padding:0 14px;border-radius:8px;border:none;background:#fff;color:#8C2F1F;font:inherit;font-weight:700;cursor:pointer">Mettre à jour maintenant</button><button type="button" id="maj-plus-tard" style="height:36px;padding:0 10px;border-radius:8px;border:1px solid rgba(255,255,255,.5);background:none;color:#fff;font:inherit;cursor:pointer">Plus tard</button>`;
       document.body.appendChild(b);
-      b.querySelector('#maj-btn').onclick = () => { if (/#\/enregistrer/.test(location.hash) && !confirm('Un formulaire est en cours. Votre saisie sera conservée et restaurée après la mise à jour. Continuer ?')) return; location.replace(`${location.pathname}?maj=${Date.now()}${location.hash}`); };
+      b.querySelector('#maj-btn').onclick = () => { if (/#\/(enregistrer|modifier)/.test(location.hash) && !confirm('Un formulaire est en cours. Votre saisie sera conservée et restaurée après la mise à jour. Continuer ?')) return; location.replace(`${location.pathname}?maj=${Date.now()}${location.hash}`); };
       b.querySelector('#maj-plus-tard').onclick = () => b.remove();
     }
   } catch (e) { /* hors ligne : on réessaiera */ }
