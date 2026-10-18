@@ -152,7 +152,8 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-014';
+const APP_VERSION = '2026-10-18-015';
+const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -443,7 +444,7 @@ async function vueEnregistrer(sens) {
       <div class="tete"><h2>Fiche du registre</h2><div style="font-size:13px;color:var(--muet)">N° d'ordre attribué à la validation</div></div>
       <div class="grille2">
         <div class="champ"><label for="contact">${estArr ? 'Expéditeur' : 'Destinataire'} <span id="d-contact"></span></label><input id="contact" required list="lcontacts"><datalist id="lcontacts"></datalist></div>
-        <div class="champ"><label for="ref">Numéro du courrier <span id="d-ref"></span></label><input id="ref" placeholder="N° porté sur le courrier"></div>
+        <div class="champ"><label for="ref">Numéro du courrier <span id="d-ref"></span></label>${estArr ? `<input id="ref" placeholder="N° porté sur le courrier">` : `<div style="display:flex;align-items:center;gap:6px"><span style="color:var(--ink-soft)">N°</span><input id="ref" placeholder="027" inputmode="numeric" style="width:110px;flex:none;font-family:var(--font-mono)"><span id="ref-suffixe" style="font-family:var(--font-mono);font-size:13px;color:var(--ink);white-space:nowrap">${SUFFIXE_DEPART}</span></div><span class="aide">Saisissez seulement le numéro écrit sur le courrier ; le reste est ajouté automatiquement.</span>`}</div>
         <div class="champ"><label for="dcour">Date du courrier <span id="d-dcour"></span></label><input id="dcour" type="date"></div>
         <div class="champ"><label for="devt">${estArr ? 'Date de réception' : "Date d'envoi"}</label><input id="devt" type="date" value="${aujourdhui()}" required></div>
         <div class="champ span2"><label for="objet">Objet <span id="d-objet"></span></label><input id="objet" required></div>
@@ -576,7 +577,9 @@ async function vueEnregistrer(sens) {
     if (ch.signataire && vue.querySelector('#sign')) { vue.querySelector('#sign').value = ch.signataire + (ch.fonction_signataire ? ` (${ch.fonction_signataire})` : ''); marquer('sign', av.has('sign') ? 'verif' : 'ok'); }
     if (ch.service_a_creer && !ch.service) { const srvSel = vue.querySelector('#service'); const opt = document.createElement('option'); opt.value = '__nouveau__'; opt.textContent = `Créer : ${ch.service_a_creer}`; opt.dataset.nom = ch.service_a_creer; srvSel.appendChild(opt); srvSel.value = '__nouveau__'; marquer('service', 'verif'); }
     const mettre = (id, val) => { if (val === undefined || val === null || val === '') return; const el = vue.querySelector('#' + id); if (!el) return; el.value = val; marquer(id, av.has(id) ? 'verif' : 'ok'); };
-    mettre('contact', ch.contact); mettre('ref', ch.reference); mettre('dcour', ch.date_courrier); mettre('objet', ch.objet); mettre('resume', ch.resume); mettre('action', ch.action_demandee); mettre('echeance', ch.echeance);
+    mettre('contact', ch.contact);
+    if (!estArr && ch.reference) { const m = String(ch.reference).match(/N[°º]?\s*([0-9]{1,5})?\s*\//i); const num = m && m[1] ? m[1] : ''; if (num) mettre('ref', num); else { marquer('ref', 'verif'); vue.querySelector('#ref').placeholder = 'numéro illisible : saisir'; } }
+    else mettre('ref', ch.reference); mettre('dcour', ch.date_courrier); mettre('objet', ch.objet); mettre('resume', ch.resume); mettre('action', ch.action_demandee); mettre('echeance', ch.echeance);
     if (ch.urgence && URGENCES[ch.urgence]) mettre('urgence', ch.urgence);
     const typ = etat.types.find((t) => t.nom.toLowerCase() === String(ch.type || '').toLowerCase()); if (typ) mettre('type', typ.id);
     const srv = etat.services.find((s) => s.nom.toLowerCase() === String(ch.service || '').toLowerCase());
@@ -597,9 +600,11 @@ async function vueEnregistrer(sens) {
       let contact_id = null; const { data: cx } = await sb.from('contacts').select('id').ilike('nom', v('contact')).maybeSingle();
       if (cx) contact_id = cx.id; else { const { data: nc } = await sb.from('contacts').insert({ nom: v('contact') }).select('id').single(); contact_id = nc?.id; }
       let serviceId = v('service_final') || v('service');
+      let numeroCourrier = v('ref');
+      if (!estArr && numeroCourrier) { numeroCourrier = numeroCourrier.replace(/^n[°º]?\s*/i, '').split('/')[0].trim(); numeroCourrier = `N° ${numeroCourrier}${SUFFIXE_DEPART}`; }
       if (serviceId === '__nouveau__') { const o = vue.querySelector('#service option[value="__nouveau__"]'); const nom = o?.dataset.nom || 'Nouveau service'; const code = nom.split(/\s+/).filter((m) => m.length > 2 && !/^(de|la|le|les|des|et|du|l')$/i.test(m)).map((m) => m[0].toUpperCase()).join('').slice(0, 6) || 'SRV'; const { data: ns, error: es } = await sb.from('services').insert({ code: code + '-' + Math.floor(Math.random() * 90 + 10), nom }).select('id').single(); if (es) throw es; serviceId = ns.id; await chargerProfil(); }
       const ligne = {
-        sens, statut: statutFinal, contact_id, contact_nom: v('contact'), reference_externe: v('ref'), date_courrier: v('dcour'), date_evenement: v('devt') || aujourdhui(),
+        sens, statut: statutFinal, contact_id, contact_nom: v('contact'), reference_externe: numeroCourrier, date_courrier: v('dcour'), date_evenement: v('devt') || aujourdhui(),
         annee: Number((v('devt') || aujourdhui()).slice(0, 4)), objet: v('objet'), type_id: v('type'), service_id: serviceId, urgence: v('urgence') || 'normal', categorie_id: v('cat'),
         signataire: v('sign'), mode_envoi: v('mode'), courrier_lie_id: v('lie'), echeance: v('echeance'), confidentiel: vue.querySelector('#conf').checked, resume: v('resume'), action_demandee: v('action'),
         observations: v('obs'), cree_par: etat.profil.id, lecture_auto: lecture, lecture_auto_le: lecture ? new Date().toISOString() : null,

@@ -204,8 +204,8 @@ export function analyserTexte(texteBrut, contexte, meta = {}) {
 
   // --- Références : la nôtre (N° …/ENA/…) et celle du courrier auquel on répond (Réf : V/L n° …)
   const mRefLiee = texte.match(/réf(?:érence)?\.?\s*:?\s*(?:v\/l|votre lettre|votre courrier|v\/c)?\s*n?[°º]?\s*:?\s*([A-Z0-9][A-Z0-9\/\-._ ]{3,40}?)(?:\s+du\s+([^\n]{6,30}))?(?=\n|$)/im);
-  const mNum = enTeteTexte.match(/\bn[°ºo]?\s*t?\s*:?\s*([0-9A-Z]{0,6}\s*\/\s*[A-Z]{2,}(?:\s*\/\s*[A-Z0-9]{2,})+)/i) || enTeteTexte.match(/\bn[°º]\s*:?\s*([A-Z0-9][A-Z0-9\/\-._ ]{2,40}?)(?=\s*\n|\s{2,}|$)/im);
-  if (mNum) { const num = mNum[1].replace(/\s*\/\s*/g, '/').trim(); champs.reference = ('N° ' + num).replace(/\s+/g, ' ').replace(/[.,;:]$/, ''); if (!fiable || /^\//.test(num)) a_verifier.push('ref'); }
+  const mNum = enTeteTexte.match(/\bn[°ºo]?\s*t?\s*:?\s*([0-9OoIl]{0,6}\s*\/\s*[A-Z]{2,}(?:\s*\/\s*[A-Z0-9]{2,})+)/i) || enTeteTexte.match(/\bn[°º]\s*:?\s*([A-Z0-9][A-Z0-9\/\-._ ]{2,40}?)(?=\s*\n|\s{2,}|$)/im);
+  if (mNum) { let num = mNum[1].replace(/\s*\/\s*/g, '/').trim(); num = num.replace(/^([0-9OoIl]+)(?=\/)/, (d) => d.replace(/[Oo]/g, '0').replace(/[Il]/g, '1')); champs.reference = ('N° ' + num).replace(/\s+/g, ' ').replace(/[.,;:]$/, ''); if (!fiable || /^\//.test(num)) a_verifier.push('ref'); }
   if (mRefLiee && (!mNum || mRefLiee[1].trim() !== mNum[1].trim())) { champs.reference_liee = mRefLiee[1].trim().replace(/\s+/g, ' '); if (mRefLiee[2]) champs.reference_liee_date = mRefLiee[2].trim(); indices.push('réponse à un courrier référencé'); }
   if (!champs.reference && mRefLiee && sens !== 'depart' && !enaEmet) champs.reference = mRefLiee[1].trim();
 
