@@ -152,7 +152,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-012';
+const APP_VERSION = '2026-10-18-013';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -268,6 +268,7 @@ async function router() {
   } catch (err) { console.error(err); toast('Erreur : ' + (err.message || err), true); }
 }
 window.addEventListener('hashchange', router);
+window.addEventListener('beforeunload', (e) => { if (/#\/enregistrer/.test(location.hash) && document.querySelector('#ffiche') && [...document.querySelectorAll('#ffiche input, #ffiche textarea')].some((i) => i.value && i.type !== 'date')) { e.preventDefault(); e.returnValue = ''; } });
 
 // ------------------------------------------------------------------
 // Tableau de bord
@@ -479,6 +480,26 @@ async function vueEnregistrer(sens) {
   selSrv2.onchange = () => { srvFinal.value = selSrv2.value || selSrv.value; };
   majSousListe(null);
   vue.querySelector('#sa').onclick = () => naviguer('#/enregistrer/arrivee');
+  // --- Brouillon local : rien ne se perd tant que le formulaire n'est pas fermé volontairement
+  const CLE_BROUILLON = 'nexora_brouillon_' + sens;
+  const champsSauvables = ['contact', 'ref', 'dcour', 'devt', 'objet', 'type', 'service', 'service2', 'service_final', 'urgence', 'cat', 'sign', 'mode', 'lie', 'echeance', 'resume', 'action', 'obs'];
+  const sauverBrouillon = () => { try { const d = {}; champsSauvables.forEach((id) => { const el = vue.querySelector('#' + id); if (el) d[id] = el.value; }); d.conf = vue.querySelector('#conf').checked; d.lecture = lecture; d.fichierNom = fichier?.name || null; d.quand = Date.now(); localStorage.setItem(CLE_BROUILLON, JSON.stringify(d)); } catch (e) { /* ignore */ } };
+  const effacerBrouillon = () => { try { localStorage.removeItem(CLE_BROUILLON); } catch (e) { /* ignore */ } };
+  window.__effacerBrouillon = effacerBrouillon;
+  vue.querySelector('#ffiche').addEventListener('input', sauverBrouillon);
+  vue.querySelector('#ffiche').addEventListener('change', sauverBrouillon);
+  try {
+    const b = JSON.parse(localStorage.getItem(CLE_BROUILLON) || 'null');
+    if (b && Object.values(b).some((v) => typeof v === 'string' && v && !/^\d{4}-\d{2}-\d{2}$/.test(v))) {
+      champsSauvables.forEach((id) => { const el = vue.querySelector('#' + id); if (el && b[id] !== undefined && id !== 'service2') el.value = b[id]; });
+      if (b.service) { selSrv.value = b.service; majSousListe(b.service_final && b.service_final !== b.service ? b.service_final : null); }
+      vue.querySelector('#conf').checked = !!b.conf; if (b.lecture) lecture = b.lecture;
+      const bando = document.createElement('div'); bando.className = 'bandeau ambre'; bando.style.marginBottom = '4px';
+      bando.innerHTML = `Saisie précédente restaurée (${esc(fmtDateHeure(new Date(b.quand)))}).${b.fichierNom ? ` Scan à rattacher de nouveau : <b>${esc(b.fichierNom)}</b>.` : ''} <button type="button" class="btn petit" id="bvider" style="margin-left:6px">Vider le formulaire</button>`;
+      vue.querySelector('#ffiche').prepend(bando);
+      bando.querySelector('#bvider').onclick = () => { effacerBrouillon(); naviguer('#/enregistrer/' + sens); };
+    }
+  } catch (e) { /* ignore */ }
   const reprise = sessionStorage.getItem('nexora_lecture');
   if (reprise) { sessionStorage.removeItem('nexora_lecture'); try { const { lecture: r, nom } = JSON.parse(reprise); lecture = r; setTimeout(() => { appliquerLecture(r); vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau vert">${ICONES.ok}Lecture reprise (${esc(nom || 'document')}) · pensez à rattacher à nouveau le scan</div>`; }, 50); } catch (e) { /* ignore */ } }
   vue.querySelector('#sd').onclick = () => naviguer('#/enregistrer/depart');
@@ -488,7 +509,7 @@ async function vueEnregistrer(sens) {
   const zone = vue.querySelector('#zone'), inputF = vue.querySelector('#fich'), info = vue.querySelector('#fichier-info'), blire = vue.querySelector('#blire'), apercu = vue.querySelector('#apercu');
   const prendreFichier = (f) => {
     if (!f) return; if (f.size > 25 * 1024 * 1024) return toast('Fichier trop volumineux (25 Mo max).', true);
-    fichier = f; blire.disabled = false;
+    fichier = f; blire.disabled = false; sauverBrouillon();
     info.innerHTML = `<div class="fichier">${ICONES.fichier}<div style="min-width:0"><div class="n">${esc(f.name)}</div><div class="s">${(f.size / 1024 / 1024).toFixed(2)} Mo</div></div></div>`;
     apercu.innerHTML = f.type.startsWith('image/') ? `<img src="${URL.createObjectURL(f)}" alt="Aperçu du scan" style="width:100%;border-radius:10px;border:1px solid var(--bord)">` : f.type === 'application/pdf' ? `<iframe src="${URL.createObjectURL(f)}" title="Aperçu du PDF" style="width:100%;height:560px;border:1px solid var(--bord);border-radius:10px"></iframe>` : '';
   };
@@ -505,7 +526,7 @@ async function vueEnregistrer(sens) {
     vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre">Lecture du document en cours…</div>`;
     try {
       const [{ data: contacts }, { data: apprentissage }] = await Promise.all([sb.from('contacts').select('nom').limit(2000), sb.from('apprentissage').select('*')]);
-      const data = await lireCourrier(fichier, { types: etat.types, services: etat.services, sens, contacts: contacts || [], apprentissage: apprentissage || [] }, (msg) => { vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre">${esc(msg)}</div>`; });
+      const data = await lireCourrier(fichier, { types: etat.types, services: etat.services, sens, contacts: contacts || [], apprentissage: apprentissage || [] }, (msg) => { vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre" data-lecture="1">${esc(msg)}</div>`; });
       lecture = data; appliquerLecture(data);
       const n = Object.keys(data.champs || {}).length;
       vue.querySelector('#etat-lecture').innerHTML = n ? `<div class="bandeau vert" title="${esc((data.indices || []).join(' · '))}">${ICONES.ok}Lecture terminée · ${n} champs détectés${data.a_verifier?.length ? ` · ${data.a_verifier.length} à vérifier` : ''}${data.indices?.length ? ' · ' + esc(data.indices.join(' · ')) : ''}</div>` : `<div class="bandeau ambre">Aucun champ reconnu : le scan est peut-être trop flou. Remplissez la fiche à la main.</div>`;
@@ -542,6 +563,7 @@ async function vueEnregistrer(sens) {
     if (ch.categorie_id) mettre('cat', ch.categorie_id);
     if (ch.montant && !vue.querySelector('#obs').value) vue.querySelector('#obs').value = `Montant : ${ch.montant}`;
     const fs = vue.querySelector('#fevs'); const evs = r.evenements || [];
+    sauverBrouillon();
     if (evs.length) { fs.style.display = 'flex'; fs.innerHTML = `<legend style="font-size:13px;font-weight:600;padding:0 6px">Dates détectées · ajouter à l'agenda</legend>` + evs.map((e, i) => `<label style="display:flex;align-items:center;gap:12px;font-size:14px;cursor:pointer"><input type="checkbox" data-ev="${i}" checked style="width:18px;height:18px;accent-color:var(--vert-fonce)"><span style="flex:1"><strong>${fmtDateHeure(e.debut)}</strong> — ${esc(e.titre)}${e.lieu ? ' · ' + esc(e.lieu) : ''}</span><span style="font-size:12px;color:var(--muet)">Rappels J-7, J-2, J-1</span></label>`).join(''); }
   };
 
@@ -577,6 +599,7 @@ async function vueEnregistrer(sens) {
         const dejaCouvert = cases.some((cb) => (lecture?.evenements || [])[Number(cb.dataset.ev)]?.debut?.slice(0, 10) === c.echeance);
         if (!dejaCouvert) await creerEvenement({ courrier_id: c.id, titre: `Échéance · ${c.objet}`.slice(0, 120), type: 'echeance', debut: c.echeance + 'T08:00:00', description: `Alerte automatique : échéance du courrier ${c.numero_ordre || ''}`.trim() }, [2]);
       }
+      effacerBrouillon();
       toast(statutFinal === 'brouillon' ? 'Brouillon enregistré.' : `Courrier enregistré sous le n° ${c.numero_ordre}.`);
       naviguer('#/courrier/' + c.id);
     } catch (err) { console.error(err); toast('Enregistrement impossible : ' + (err.message || err), true); bb.disabled = bv.disabled = false; }
@@ -906,12 +929,12 @@ async function verifierMiseAJour() {
   try {
     const r = await fetch(`assets/version.json?t=${Date.now()}`, { cache: 'no-store' }); if (!r.ok) return;
     const { version } = await r.json();
-    if (version && version !== APP_VERSION && !document.getElementById('maj-banniere')) {
+    if (version && version !== APP_VERSION && !document.getElementById('maj-banniere') && !document.querySelector('.bandeau.ambre[data-lecture]')) {
       const b = document.createElement('div'); b.id = 'maj-banniere';
       b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:60;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:10px 16px;background:#8C2F1F;color:#fff;font-size:14px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.2)';
       b.innerHTML = `<span>Une nouvelle version de NEXORA est disponible (v${esc(version)}).</span><button type="button" id="maj-btn" style="height:36px;padding:0 14px;border-radius:8px;border:none;background:#fff;color:#8C2F1F;font:inherit;font-weight:700;cursor:pointer">Mettre à jour maintenant</button><button type="button" id="maj-plus-tard" style="height:36px;padding:0 10px;border-radius:8px;border:1px solid rgba(255,255,255,.5);background:none;color:#fff;font:inherit;cursor:pointer">Plus tard</button>`;
       document.body.appendChild(b);
-      b.querySelector('#maj-btn').onclick = () => { location.replace(`${location.pathname}?maj=${Date.now()}${location.hash}`); };
+      b.querySelector('#maj-btn').onclick = () => { if (/#\/enregistrer/.test(location.hash) && !confirm('Un formulaire est en cours. Votre saisie sera conservée et restaurée après la mise à jour. Continuer ?')) return; location.replace(`${location.pathname}?maj=${Date.now()}${location.hash}`); };
       b.querySelector('#maj-plus-tard').onclick = () => b.remove();
     }
   } catch (e) { /* hors ligne : on réessaiera */ }
@@ -923,9 +946,11 @@ setTimeout(verifierMiseAJour, 4000);
 // ------------------------------------------------------------------
 // Démarrage
 // ------------------------------------------------------------------
+let premierRendu = true;
 sb.auth.onAuthStateChange(async (evt, session) => {
-  etat.session = session;
+  const avaitSession = !!etat.session; etat.session = session;
+  if (evt === 'TOKEN_REFRESHED' || (evt === 'SIGNED_IN' && avaitSession && etat.profil)) return; // simple rafraîchissement : on ne touche pas à l'écran
   if (session) { if (!etat.profil || evt === 'SIGNED_IN') await chargerProfil(); }
   else etat.profil = null;
-  router();
+  if (premierRendu || evt === 'SIGNED_IN' || evt === 'SIGNED_OUT' || evt === 'INITIAL_SESSION') { premierRendu = false; router(); }
 });
