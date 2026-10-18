@@ -272,7 +272,7 @@ export function analyserTexte(texteBrut, contexte, meta = {}) {
   const montant = extraireMontant(texte); if (montant) { champs.montant = montant; if (champs.type === 'Facture' && !champs.objet) champs.objet = `Facture ${montant}`; }
   champs.action_demandee = devinerAction(texte, champs.type);
   champs.urgence = appris?.urgence || devinerUrgence(texte, champs.echeance);
-  if (sensEffectif === 'depart') { if (serviceEmetteur) champs.service = serviceEmetteur.nom; else if (enaEmet) { const dir = enTete.find((l) => /^(?:école|ecole|direction|service|cellule|centre)\s/i.test(l) && !/nationale d.administration/i.test(l)); if (dir) champs.service_a_creer = dir.replace(/\s{2,}/g, ' ').trim(); } }
+  if (sensEffectif === 'depart') { const egad = services.find((x) => x.code === 'EGAD'); if (egad) champs.service = egad.nom; else if (serviceEmetteur) champs.service = serviceEmetteur.nom; }
   else { const sAppris = appris?.service_id ? services.find((s) => s.id === appris.service_id)?.nom : null; champs.service = sAppris || devinerService(texte, services); }
   if (appris?.categorie_id) champs.categorie_id = appris.categorie_id;
   if (appris) indices.push('type et service repris de vos enregistrements précédents');
