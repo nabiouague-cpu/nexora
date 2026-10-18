@@ -153,7 +153,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-016';
+const APP_VERSION = '2026-10-18-017';
 const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
@@ -455,8 +455,7 @@ async function vueEnregistrer(sens) {
           <input type="hidden" id="service_final"></div>` : `<div class="champ"><label>Émetteur</label><div style="padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-2);font-weight:600">École de gestion administrative et diplomatique</div><input type="hidden" id="service" value="${esc((etat.services.find((x) => x.code === 'EGAD') || {}).id || '')}"><input type="hidden" id="service_final" value="${esc((etat.services.find((x) => x.code === 'EGAD') || {}).id || '')}"><span class="aide">Tous les courriers départ partent de l'EGAD.</span></div>`}
         <div class="champ"><label for="urgence">Niveau d'urgence <span id="d-urgence"></span></label><select id="urgence">${Object.entries(URGENCES).map(([k, l]) => `<option value="${k}" ${k === 'normal' ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="champ"><label for="cat">Catégorie</label><select id="cat"><option value="">—</option>${opt(etat.categories)}</select></div>
-        ${estArr ? '' : `<div class="champ"><label for="signataire">Signataire <span id="d-signataire"></span></label><select id="signataire" required><option value="">—</option>${(etat.signataires || []).map((g) => `<option value="${g.id}" data-interim="${g.interimaire ? 1 : 0}">${esc(g.fonction)}${g.nom ? ' · ' + esc(g.nom) : ''}</option>`).join('')}</select></div>
-        <div class="champ" id="champ-sign" style="display:none"><label for="sign">Nom de l'intérimaire</label><input id="sign" placeholder="Nom et prénoms de la personne désignée"></div>
+        ${estArr ? '' : `<div class="champ span2"><label for="signataire">Signataire <span id="d-signataire"></span></label><div style="display:flex;gap:8px;align-items:center"><select id="signataire" required style="flex:1 1 50%"><option value="">—</option>${(etat.signataires || []).map((g) => `<option value="${g.id}" data-interim="${g.interimaire ? 1 : 0}">${esc(g.fonction)}${g.nom ? ' · ' + esc(g.nom) : ''}</option>`).join('')}</select><input id="sign" placeholder="Nom de l'intérimaire" aria-label="Nom de l'intérimaire" style="flex:1 1 50%;display:none"></div></div>
         <div class="champ"><label for="mode">Mode d'envoi</label><select id="mode">${Object.entries(MODES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
         <div class="champ span2"><label for="lie">En réponse au courrier arrivée</label><select id="lie"><option value="">— Aucun —</option>${(arrivees || []).map((a) => `<option value="${a.id}">${esc(a.numero_ordre)} · ${esc(a.objet).slice(0, 70)}</option>`).join('')}</select></div>`}
         <div class="champ"><label for="echeance">Échéance (facultatif) <span id="d-echeance"></span></label><input id="echeance" type="date"><span class="aide">Si renseignée, une alerte est programmée dans l'agenda 2 jours avant.</span></div>
@@ -474,7 +473,7 @@ async function vueEnregistrer(sens) {
   // Direction → seconde liste déroulante juste à côté (comme un sous-menu)
   const selSrv = vue.querySelector('#service'), selSrv2 = vue.querySelector('#service2'), srvFinal = vue.querySelector('#service_final');
   const selSign = vue.querySelector('#signataire');
-  if (selSign) { const majInterim = () => { const o = selSign.selectedOptions[0]; vue.querySelector('#champ-sign').style.display = o && o.dataset.interim === '1' ? '' : 'none'; }; selSign.onchange = majInterim; majInterim(); }
+  if (selSign) { const majInterim = () => { const o = selSign.selectedOptions[0]; const inp = vue.querySelector('#sign'); const inter = o && o.dataset.interim === '1'; inp.style.display = inter ? '' : 'none'; if (inter && !inp.value) inp.focus(); }; selSign.onchange = majInterim; majInterim(); }
   const majSousListe = (sousId) => {
     if (!selSrv2) { srvFinal.value = selSrv.value; return; }
     const d = etat.services.find((y) => y.id === selSrv.value); const enfants = d ? etat.services.filter((y) => y.parent_id === d.id) : [];
@@ -582,7 +581,7 @@ async function vueEnregistrer(sens) {
     if (selSign && (ch.fonction_signataire || ch.signataire)) {
       const f = normaliser(ch.fonction_signataire || ''); const n = normaliser(ch.signataire || '');
       const g = (etat.signataires || []).find((x) => { const fx = normaliser(x.fonction); return (f && (fx.includes(f) || f.includes(fx.split(' ')[0] + ' ' + (fx.split(' ')[1] || '')))) || (x.nom && n && normaliser(x.nom).split(' ').some((m) => m.length > 3 && n.includes(m))); })
-        || (/directeur general|directrice generale/.test(f) ? (etat.signataires || []).find((x) => /directeur g/i.test(normaliser(x.fonction))) : /secretaire general/.test(f) ? (etat.signataires || []).find((x) => /secretaire g/i.test(normaliser(x.fonction))) : /directeur|directrice/.test(f) ? (etat.signataires || []).find((x) => /directrice de l ecole/i.test(normaliser(x.fonction))) : null);
+        || (/directeur general|directrice generale/.test(f) ? (etat.signataires || []).find((x) => /directeur g/i.test(normaliser(x.fonction))) : /secretaire general/.test(f) ? (etat.signataires || []).find((x) => /secretaire g/i.test(normaliser(x.fonction))) : /directeur|directrice/.test(f) ? (etat.signataires || []).find((x) => /directrice egad/i.test(normaliser(x.fonction))) : null);
       if (g) { selSign.value = g.id; selSign.dispatchEvent(new Event('change')); marquer('signataire', fiableLecture(r) ? 'ok' : 'verif'); }
     }
     if (ch.service_a_creer && !ch.service && estArr) { const srvSel = vue.querySelector('#service'); const opt = document.createElement('option'); opt.value = '__nouveau__'; opt.textContent = `Créer : ${ch.service_a_creer}`; opt.dataset.nom = ch.service_a_creer; srvSel.appendChild(opt); srvSel.value = '__nouveau__'; marquer('service', 'verif'); }
@@ -616,7 +615,7 @@ async function vueEnregistrer(sens) {
       const sigSel = vue.querySelector('#signataire'); const sigObj = sigSel ? (etat.signataires || []).find((g) => g.id === sigSel.value) : null;
       if (!estArr && !sigObj) { toast('Choisissez le signataire du courrier.', true); bb.disabled = bv.disabled = false; return; }
       if (!estArr && sigObj?.interimaire && !v('sign')) { toast("Indiquez le nom de l'intérimaire.", true); bb.disabled = bv.disabled = false; return; }
-      const signataireTexte = sigObj ? (sigObj.interimaire ? `${v('sign')} (intérimaire désigné)` : sigObj.fonction + (sigObj.nom ? ' · ' + sigObj.nom : '')) : null;
+      const signataireTexte = sigObj ? (sigObj.interimaire ? `${v('sign')} (intérimaire)` : sigObj.fonction + (sigObj.nom ? ' · ' + sigObj.nom : '')) : null;
       const ligne = {
         sens, statut: statutFinal, contact_id, contact_nom: v('contact'), reference_externe: numeroCourrier, date_courrier: v('dcour'), date_evenement: v('devt') || aujourdhui(),
         annee: Number((v('devt') || aujourdhui()).slice(0, 4)), objet: v('objet'), type_id: v('type'), service_id: serviceId, urgence: v('urgence') || 'normal', categorie_id: v('cat'),
@@ -931,7 +930,7 @@ async function vueParametres() {
       ${gere ? `<form id="fcat" style="display:flex;gap:8px;margin-top:6px;align-items:flex-end"><div class="champ" style="flex:1"><label for="knom">Nouvelle catégorie</label><input id="knom" placeholder="Ex. Scolarité" required></div><button class="btn petit principal" type="submit">${ICONES.plus}Ajouter</button></form>` : ''}
       <div style="font-size:12px;color:var(--muet)">Un élément désactivé disparaît des listes mais reste sur les courriers déjà enregistrés.</div></section>
   </div>
-  <section class="carte"><div class="tete"><h2>Signataires des courriers départ (EGAD)</h2><span class="chip gris">${(etat.signataires || []).length}</span></div>
+  <section class="carte"><div class="tete"><h2>Signataires des courriers départ</h2><span class="chip gris">${(etat.signataires || []).length}</span></div>
     <div style="font-size:12px;color:var(--ink-soft)">Indiquez le nom de la personne en poste pour chaque fonction ; il apparaîtra dans le registre et les rapports.</div>
     ${(etat.signataires || []).map((g) => `<form data-sig="${g.id}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;padding:8px 0;border-bottom:1px solid var(--bord-leger)"><div style="flex:1 1 320px;font-weight:600">${esc(g.fonction)}${g.interimaire ? ' <span class="chip ambre">nom saisi à chaque courrier</span>' : ''}</div>${g.interimaire ? '' : `<div class="champ" style="flex:1 1 220px"><label class="sr" for="sn-${g.id}">Nom</label><input id="sn-${g.id}" value="${esc(g.nom || '')}" placeholder="Nom et prénoms"></div><button class="btn petit" type="submit">Enregistrer</button>`}</form>`).join('')}
   </section>
