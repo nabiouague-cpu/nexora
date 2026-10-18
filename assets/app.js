@@ -154,7 +154,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-023';
+const APP_VERSION = '2026-10-18-024';
 const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
@@ -240,7 +240,7 @@ function ouvrirRecherche() {
   let t; const chercher = async () => {
     const q = inp.value.trim(); if (q.length < 2) { m.querySelector('#rg-res').innerHTML = ''; return; }
     const tt = `%${q.replace(/[%_,]/g, '')}%`;
-    const { data } = await sb.from('v_courriers').select('id,numero_ordre,sens,objet,contact_nom,date_evenement,statut,echeance').not('statut', 'in', '(brouillon,annule)').or(`objet.ilike.${tt},contact_nom.ilike.${tt},numero_ordre.ilike.${tt},reference_externe.ilike.${tt},resume.ilike.${tt}`).order('date_evenement', { ascending: false }).limit(15);
+    const { data } = await sb.from('v_registre').select('id,numero_ordre,sens,objet,contact_nom,date_evenement,statut,echeance').not('statut', 'in', '(brouillon,annule)').or(`objet.ilike.${tt},contact_nom.ilike.${tt},numero_ordre.ilike.${tt},reference_externe.ilike.${tt},resume.ilike.${tt}`).order('date_evenement', { ascending: false }).limit(15);
     m.querySelector('#rg-res').innerHTML = (data || []).length ? data.map((c) => `<a href="#/courrier/${c.id}" class="tb-notif-item" style="border:1px solid var(--bord-leger)">${numero(c)}<span style="flex:1;min-width:0"><b>${esc(c.objet)}</b><small>${esc(c.contact_nom)} · ${fmtDate(c.date_evenement)}</small></span>${chipStatut(c)}</a>`).join('') : `<div class="tb-notif-vide">Aucun résultat.</div>`;
     m.querySelectorAll('a').forEach((a) => a.onclick = () => m.remove());
   };
@@ -281,18 +281,18 @@ async function vueTableau() {
   const vue = coque('tableau', ecranChargement('Chargement des données…'));
   const auj = aujourdhui(); const d7 = iso(ajouterJours(new Date(), -6)); const d8 = iso(ajouterJours(new Date(), 7));
   const [jour, attente, retard, echeances, sept, evs] = await Promise.all([
-    sb.from('v_courriers').select('*').eq('date_evenement', auj).not('statut', 'in', '(brouillon,annule)').order('cree_le', { ascending: false }),
+    sb.from('v_registre').select('*').eq('date_enregistrement', auj).not('statut', 'in', '(brouillon,annule)').order('cree_le', { ascending: false }),
     sb.from('courriers').select('id', { count: 'exact', head: true }).in('statut', ['recu', 'a_traiter', 'transmis']).eq('sens', 'arrivee'),
     sb.from('courriers').select('id', { count: 'exact', head: true }).in('statut', ['recu', 'a_traiter', 'transmis']).lt('echeance', auj),
     sb.from('courriers').select('id', { count: 'exact', head: true }).gte('echeance', auj).lte('echeance', d8).not('statut', 'in', '(traite,classe,annule,brouillon)'),
-    sb.from('courriers').select('sens,date_evenement').gte('date_evenement', d7).lte('date_evenement', auj).not('statut', 'in', '(brouillon,annule)'),
+    sb.from('courriers').select('sens,date_enregistrement').gte('date_enregistrement', d7).lte('date_enregistrement', auj).not('statut', 'in', '(brouillon,annule)'),
     sb.from('evenements').select('*, courriers(numero_ordre)').gte('debut', new Date(auj).toISOString()).lte('debut', new Date(d8 + 'T23:59:59').toISOString()).eq('statut', 'a_venir').order('debut').limit(6),
   ]);
   const lj = jour.data || [];
   const nArr = lj.filter((c) => c.sens === 'arrivee').length, nDep = lj.filter((c) => c.sens === 'depart').length;
   // 7 jours
   const jours = [...Array(7)].map((_, i) => iso(ajouterJours(new Date(), i - 6)));
-  const comptes = jours.map((j) => ({ j, a: (sept.data || []).filter((c) => c.date_evenement === j && c.sens === 'arrivee').length, d: (sept.data || []).filter((c) => c.date_evenement === j && c.sens === 'depart').length }));
+  const comptes = jours.map((j) => ({ j, a: (sept.data || []).filter((c) => c.date_enregistrement === j && c.sens === 'arrivee').length, d: (sept.data || []).filter((c) => c.date_enregistrement === j && c.sens === 'depart').length }));
   const max = Math.max(1, ...comptes.map((c) => Math.max(c.a, c.d)));
   const alertes = (evs.data || []).map((e) => {
     const d = new Date(e.debut); const diff = Math.round((new Date(iso(d)) - new Date(auj)) / 86400000);
@@ -305,20 +305,20 @@ async function vueTableau() {
       ${peutEcrire() ? `<a class="btn principal" href="#/enregistrer/arrivee">${ICONES.plus}Enregistrer un courrier</a>` : ''}
     </div></header>
   <section class="grille4" aria-label="Chiffres du jour">
-    <div class="carte kpi"><div class="lib">Arrivées aujourd'hui</div><div class="val">${nArr}</div><div class="det">${lj.filter((c) => c.sens === 'arrivee' && c.statut === 'transmis').length} transmis</div></div>
-    <div class="carte kpi"><div class="lib">Départs aujourd'hui</div><div class="val">${nDep}</div><div class="det">${lj.filter((c) => c.sens === 'depart' && c.mode_envoi).map((c) => MODES[c.mode_envoi]).filter((v, i, a) => a.indexOf(v) === i).join(', ') || '—'}</div></div>
+    <div class="carte kpi"><div class="lib">Arrivées enregistrées aujourd'hui</div><div class="val">${nArr}</div><div class="det">${lj.filter((c) => c.sens === 'arrivee' && c.statut === 'transmis').length} transmis</div></div>
+    <div class="carte kpi"><div class="lib">Départs enregistrés aujourd'hui</div><div class="val">${nDep}</div><div class="det">${lj.filter((c) => c.sens === 'depart' && c.mode_envoi).map((c) => MODES[c.mode_envoi]).filter((v, i, a) => a.indexOf(v) === i).join(', ') || '—'}</div></div>
     <div class="carte kpi"><div class="lib">En attente de traitement</div><div class="val" style="color:var(--ambre)">${attente.count ?? 0}</div><div class="det">dont ${retard.count ?? 0} en retard</div></div>
     <div class="carte kpi"><div class="lib">Échéances sous 7 jours</div><div class="val" style="color:var(--bordeaux)">${echeances.count ?? 0}</div><div class="det">${(evs.data || [])[0] ? 'prochaine : ' + fmtDate((evs.data || [])[0].debut) : 'rien de prévu'}</div></div>
   </section>
   <div class="grille3">
     <section class="carte plein span2" aria-label="Courriers du jour">
-      <div class="tete"><h2>Courriers du jour</h2><a href="#/arrivees" style="font-size:13px;font-weight:500">Voir le registre</a></div>
+      <div class="tete"><h2>Courriers enregistrés aujourd'hui</h2><a href="#/arrivees" style="font-size:13px;font-weight:500">Voir le registre</a></div>
       <div class="defile">${tableCourriers(lj, ['numero', 'contact', 'objet', 'type', 'statut'])}</div>
     </section>
     <section class="carte" aria-label="Alertes à venir"><div class="tete"><h2>Alertes à venir</h2><a href="#/agenda" style="font-size:13px;font-weight:500">Agenda</a></div>${alertes}</section>
   </div>
   <section class="carte" aria-label="Activité des 7 derniers jours">
-    <div class="tete"><h2>Activité des 7 derniers jours</h2><div class="legende"><span><i style="background:var(--vert-fonce)"></i>Arrivées</span><span><i style="background:var(--corail)"></i>Départs</span></div></div>
+    <div class="tete"><h2>Enregistrements des 7 derniers jours</h2><div class="legende"><span><i style="background:var(--vert-fonce)"></i>Arrivées</span><span><i style="background:var(--corail)"></i>Départs</span></div></div>
     <div class="barres" role="img" aria-label="Arrivées et départs par jour sur 7 jours">${comptes.map((c) => { const d = new Date(c.j); return `<div class="col"><div class="duo"><div class="arr" style="height:${Math.round(c.a / max * 100)}%" title="${c.a} arrivée(s)"></div><div class="dep" style="height:${Math.round(c.d / max * 100)}%" title="${c.d} départ(s)"></div></div><div class="lib">${JOURS_C[d.getDay()]} ${d.getDate()}</div></div>`; }).join('')}</div>
   </section>`;
   lierLignes(vue);
@@ -326,11 +326,12 @@ async function vueTableau() {
 
 function tableCourriers(liste, cols) {
   if (!liste.length) return `<div class="vide">Aucun courrier.</div>`;
-  const entetes = { numero: "N° d'ordre", date: 'Envoyé / Reçu le', contact: 'Expéditeur / Destinataire', objet: 'Objet', type: 'Type', service: 'Service', echeance: 'Échéance', statut: 'Statut', scan: 'Scan' };
+  const entetes = { numero: "N° d'ordre", date: 'Envoyé / Reçu le', enreg: 'Enregistré le', contact: 'Expéditeur / Destinataire', objet: 'Objet', type: 'Type', service: 'Service', echeance: 'Échéance', statut: 'Statut', scan: 'Scan' };
   const cellule = (c, col) => {
     switch (col) {
       case 'numero': return `<td>${numero(c)}</td>`;
       case 'date': return `<td>${fmtDate(c.date_evenement)}</td>`;
+      case 'enreg': return `<td>${fmtDate(c.date_enregistrement || c.cree_le)}</td>`;
       case 'contact': return `<td>${esc(c.contact_nom)}</td>`;
       case 'objet': return `<td>${esc(c.objet)}</td>`;
       case 'type': return `<td>${esc(c.type_nom || '')}</td>`;
@@ -368,8 +369,8 @@ async function vueRegistre(sens) {
     else if (filtres.periode === 'annee') { debut = `${annee}-01-01`; fin = `${annee}-12-31`; libelle = `Année ${annee}`; }
     else libelle = 'Toutes les périodes';
     const taille = 15;
-    let req = sb.from('v_courriers').select('*', { count: 'exact' }).eq('sens', sens).order('date_evenement', { ascending: false }).order('cree_le', { ascending: false }).range(filtres.page * taille, filtres.page * taille + taille - 1);
-    if (debut) req = req.gte('date_evenement', debut).lte('date_evenement', fin);
+    let req = sb.from('v_registre').select('*', { count: 'exact' }).eq('sens', sens).order('date_enregistrement', { ascending: false }).order('cree_le', { ascending: false }).range(filtres.page * taille, filtres.page * taille + taille - 1);
+    if (debut) req = req.gte('date_enregistrement', debut).lte('date_enregistrement', fin);
     if (filtres.type) req = req.eq('type_id', filtres.type);
     if (filtres.statut) req = req.eq('statut', filtres.statut); else req = req.not('statut', 'in', '(brouillon,annule)');
     if (filtres.q) { const t = `%${filtres.q.replace(/[%_]/g, '')}%`; req = req.or(`objet.ilike.${t},contact_nom.ilike.${t},numero_ordre.ilike.${t},reference_externe.ilike.${t},resume.ilike.${t}`); }
@@ -389,8 +390,8 @@ async function vueRegistre(sens) {
       <label for="fs" style="font-size:13px;color:var(--muet)">Statut</label><select id="fs" class="filtre-select"><option value="">Tous</option>${Object.entries(STATUTS).filter(([k]) => k !== 'brouillon').map(([k, [l]]) => `<option value="${k}" ${filtres.statut === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <button class="btn petit" type="submit">Filtrer</button>
     </form>
-    <div class="resume-ligne"><span>${esc(libelle)}</span><span>·</span><span><strong style="color:var(--vert-fonce)">${count ?? 0}</strong> courrier${(count ?? 0) > 1 ? 's' : ''}</span><span>·</span><span><strong style="color:var(--ambre)">${nAttente}</strong> à traiter</span><span>·</span><span><strong style="color:var(--bordeaux)">${nRetard}</strong> en retard</span></div>
-    <section class="carte plein"><div class="defile">${tableCourriers(liste, ['numero', 'date', 'contact', 'objet', 'type', 'service', 'echeance', 'statut', 'scan'])}</div>
+    <div class="resume-ligne"><span>${esc(libelle)} (par date d'enregistrement)</span><span>·</span><span><strong style="color:var(--vert-fonce)">${count ?? 0}</strong> courrier${(count ?? 0) > 1 ? 's' : ''}</span><span>·</span><span><strong style="color:var(--ambre)">${nAttente}</strong> à traiter</span><span>·</span><span><strong style="color:var(--bordeaux)">${nRetard}</strong> en retard</span></div>
+    <section class="carte plein"><div class="defile">${tableCourriers(liste, ['numero', 'enreg', 'date', 'contact', 'objet', 'type', 'service', 'echeance', 'statut', 'scan'])}</div>
       <div class="pied"><span>Page ${filtres.page + 1} sur ${nbPages}</span><div style="display:flex;gap:6px"><button class="ico" id="pprec" type="button" aria-label="Page précédente" ${filtres.page === 0 ? 'disabled' : ''}>${ICONES.gauche}</button><button class="ico" id="psuiv" type="button" aria-label="Page suivante" ${filtres.page + 1 >= nbPages ? 'disabled' : ''}>${ICONES.droite}</button></div></div></section>`;
 
     vue.querySelectorAll('[data-p]').forEach((b) => b.onclick = () => { filtres.periode = b.dataset.p; filtres.page = 0; rendre(); });
@@ -398,8 +399,8 @@ async function vueRegistre(sens) {
     vue.querySelector('#pprec').onclick = () => { filtres.page--; rendre(); };
     vue.querySelector('#psuiv').onclick = () => { filtres.page++; rendre(); };
     vue.querySelector('#bexcel').onclick = async () => {
-      let r = sb.from('v_courriers').select('*').eq('sens', sens).not('statut', 'in', '(brouillon,annule)').order('date_evenement');
-      if (debut) r = r.gte('date_evenement', debut).lte('date_evenement', fin);
+      let r = sb.from('v_registre').select('*').eq('sens', sens).not('statut', 'in', '(brouillon,annule)').order('date_enregistrement');
+      if (debut) r = r.gte('date_enregistrement', debut).lte('date_enregistrement', fin);
       const { data: tout } = await r;
       exporterExcel(tout || [], `NEXORA_${estArr ? 'arrivees' : 'departs'}_${(libelle || 'tout').replace(/[^\w]+/g, '_')}.xlsx`);
     };
@@ -410,7 +411,7 @@ async function vueRegistre(sens) {
 
 function exporterExcel(liste, nomFichier) {
   const lignes = liste.map((c) => ({
-    'N° d\'ordre': c.numero_ordre, 'Sens': c.sens === 'arrivee' ? 'Arrivée' : 'Départ', 'Date d\'envoi / réception': fmtDate(c.date_evenement), 'Date du courrier': fmtDate(c.date_courrier), 'Date d\'enregistrement': fmtDate(c.cree_le),
+    'N° d\'ordre': c.numero_ordre, 'Sens': c.sens === 'arrivee' ? 'Arrivée' : 'Départ', 'Date d\'envoi / réception': fmtDate(c.date_evenement), 'Date du courrier': fmtDate(c.date_courrier), 'Date d\'enregistrement': fmtDate(c.date_enregistrement || c.cree_le),
     'Numéro du courrier': c.reference_externe || '', 'En réponse à': c.reference_liee || '', 'Expéditeur / Destinataire': c.contact_nom, 'Objet': c.objet, 'Type': c.type_nom || '', 'Catégorie': c.categorie_nom || '',
     'Service': c.service_nom_complet || c.service_nom || '', 'Signataire': c.signataire || '', 'Mode d\'envoi': MODES[c.mode_envoi] || '', 'Urgence': URGENCES[c.urgence] || '', 'Échéance': fmtDate(c.echeance),
     'Statut': (STATUTS[c.statut] || [c.statut])[0], 'Résumé': c.resume || '', 'Action demandée': c.action_demandee || '', 'Observations': c.observations || '', 'Pièces jointes': c.nb_pieces || 0,
@@ -712,7 +713,7 @@ async function creerEvenement(e, joursRappel = [7, 2, 1]) {
 async function vueCourrier(id) {
   const vue = coque('arrivees', ecranChargement('Chargement des données…'));
   const [{ data: c }, { data: pjs }, { data: trs }, { data: evs }] = await Promise.all([
-    sb.from('v_courriers').select('*').eq('id', id).maybeSingle(),
+    sb.from('v_registre').select('*').eq('id', id).maybeSingle(),
     sb.from('pieces_jointes').select('*').eq('courrier_id', id).order('cree_le'),
     sb.from('transmissions').select('*, services(nom)').eq('courrier_id', id).order('transmis_le'),
     sb.from('evenements').select('*').eq('courrier_id', id).order('debut'),
@@ -734,7 +735,7 @@ async function vueCourrier(id) {
       <div class="tete"><h2>Fiche du registre</h2><span style="font-size:12px;color:var(--muet)">Enregistré le ${fmtDateHeure(c.cree_le)}</span></div>
       <dl class="fiche grille2" style="margin:0">
         ${champ(estArr ? 'Expéditeur' : 'Destinataire', esc(c.contact_nom))}${champ('Numéro du courrier', esc(c.reference_externe))}
-        ${estArr ? champ('Date du courrier', fmtDate(c.date_courrier)) + champ('Date de réception', fmtDate(c.date_evenement)) : champ("Date d'envoi", fmtDate(c.date_evenement)) + champ("Date d'enregistrement", fmtDate(c.cree_le))}
+        ${estArr ? champ('Date du courrier', fmtDate(c.date_courrier)) + champ('Date de réception', fmtDate(c.date_evenement)) : champ("Date d'envoi", fmtDate(c.date_evenement)) + champ("Date d'enregistrement", fmtDate(c.date_enregistrement || c.cree_le))}
         ${champ('Type', esc(c.type_nom))}${champ(estArr ? 'Destinataire interne' : 'Service émetteur', esc(c.service_nom_complet || c.service_nom))}
         ${champ('Catégorie', esc(c.categorie_nom))}${champ('Urgence', URGENCES[c.urgence])}
         ${estArr ? '' : champ('Signataire', esc(c.signataire || c.signataire_fonction)) + champ("Mode d'envoi", MODES[c.mode_envoi])}
@@ -849,7 +850,7 @@ async function vueArchives() {
   const listeAnnees = [...new Set((annees || []).map((a) => a.annee))]; if (!listeAnnees.length) listeAnnees.push(new Date().getFullYear());
   const sel = { annee: listeAnnees[0], mois: '', sens: '' };
   const rendre = async () => {
-    let req = sb.from('v_courriers').select('*').eq('annee', sel.annee).not('statut', 'in', '(brouillon,annule)').order('date_evenement', { ascending: false }).limit(500);
+    let req = sb.from('v_registre').select('*').eq('annee', sel.annee).not('statut', 'in', '(brouillon,annule)').order('date_evenement', { ascending: false }).limit(500);
     if (sel.mois) { const fin = new Date(sel.annee, Number(sel.mois), 0); req = req.gte('date_evenement', `${sel.annee}-${pad(sel.mois)}-01`).lte('date_evenement', iso(fin)); }
     if (sel.sens) req = req.eq('sens', sel.sens);
     const { data } = await req; const liste = data || [];
@@ -866,7 +867,7 @@ async function vueArchives() {
     vue.querySelector('#aa').onchange = (e) => { sel.annee = Number(e.target.value); rendre(); };
     vue.querySelector('#am').onchange = (e) => { sel.mois = e.target.value; rendre(); };
     vue.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { sel.sens = b.dataset.s; rendre(); });
-    vue.querySelector('#bexcel').onclick = async () => { const { data: tout } = await sb.from('v_courriers').select('*').eq('annee', sel.annee).not('statut', 'in', '(brouillon,annule)').order('date_evenement'); exporterExcel(tout || [], `NEXORA_registre_${sel.annee}.xlsx`); };
+    vue.querySelector('#bexcel').onclick = async () => { const { data: tout } = await sb.from('v_registre').select('*').eq('annee', sel.annee).not('statut', 'in', '(brouillon,annule)').order('date_evenement'); exporterExcel(tout || [], `NEXORA_registre_${sel.annee}.xlsx`); };
     lierLignes(vue);
   };
   await rendre();
@@ -896,14 +897,14 @@ async function vueRapports() {
   <section class="grille4">${TYPES.map(([t, l, d]) => `<div class="carte rc"><h2>${l}</h2><p>${d}</p><div class="bas"><button class="btn petit principal" data-pdf="${t}">${ICONES.telecharger}Générer le PDF</button>${t === 'annee' ? `<button class="btn petit" data-xlsx="annee">Registre Excel</button>` : ''}</div></div>`).join('')}</section>
   <section class="carte plein"><div class="tete"><h2>Rapports générés</h2></div><div class="defile">${liens.length ? `<table><thead><tr><th>Rapport</th><th>Période</th><th>Généré le</th><th><span class="sr">Télécharger</span></th></tr></thead><tbody>${liens.map((r) => `<tr><td style="font-weight:600">${LIB[r.type]}</td><td>${fmtDate(r.periode_debut)} – ${fmtDate(r.periode_fin)}</td><td>${fmtDateHeure(r.genere_le)}</td><td>${r.url ? `<a class="ico" href="${r.url}" target="_blank" rel="noopener" aria-label="Télécharger">${ICONES.telecharger}</a>` : '—'}</td></tr>`).join('')}</tbody></table>` : `<div class="vide">Aucun rapport généré pour l'instant.</div>`}</div></section>`;
   vue.querySelectorAll('[data-pdf]').forEach((b) => b.onclick = async () => { b.disabled = true; try { await genererRapport(b.dataset.pdf, new Date(vue.querySelector('#rdate').value || aujourdhui())); router(); } catch (e) { console.error(e); toast('Génération impossible : ' + e.message, true); b.disabled = false; } });
-  vue.querySelector('[data-xlsx]')?.addEventListener('click', async () => { const a = new Date(vue.querySelector('#rdate').value || aujourdhui()).getFullYear(); const { data } = await sb.from('v_courriers').select('*').eq('annee', a).not('statut', 'in', '(brouillon,annule)').order('date_evenement'); exporterExcel(data || [], `NEXORA_registre_${a}.xlsx`); });
+  vue.querySelector('[data-xlsx]')?.addEventListener('click', async () => { const a = new Date(vue.querySelector('#rdate').value || aujourdhui()).getFullYear(); const { data } = await sb.from('v_registre').select('*').eq('annee', a).not('statut', 'in', '(brouillon,annule)').order('date_evenement'); exporterExcel(data || [], `NEXORA_registre_${a}.xlsx`); });
 }
 
 async function genererRapport(type, ref) {
   const [debut, fin, libelle] = bornes(type, ref);
-  const { data } = await sb.from('v_courriers').select('*').gte('date_evenement', debut).lte('date_evenement', fin).not('statut', 'in', '(brouillon,annule)').order('date_evenement');
+  const { data } = await sb.from('v_registre').select('*').gte('date_enregistrement', debut).lte('date_enregistrement', fin).not('statut', 'in', '(brouillon,annule)').order('date_enregistrement');
   const liste = data || [];
-  const { data: attente } = await sb.from('v_courriers').select('*').in('statut', ['recu', 'a_traiter', 'transmis']).order('echeance', { ascending: true, nullsFirst: false }).limit(50);
+  const { data: attente } = await sb.from('v_registre').select('*').in('statut', ['recu', 'a_traiter', 'transmis']).order('echeance', { ascending: true, nullsFirst: false }).limit(50);
   const { data: evs } = await sb.from('evenements').select('*').eq('statut', 'a_venir').gte('debut', new Date(fin).toISOString()).lte('debut', ajouterJours(new Date(fin), 14).toISOString()).order('debut').limit(20);
   const arr = liste.filter((c) => c.sens === 'arrivee'), dep = liste.filter((c) => c.sens === 'depart');
   const compter = (l, cle) => { const m = {}; l.forEach((c) => { const k = c[cle] || 'Non renseigné'; m[k] = (m[k] || 0) + 1; }); return Object.entries(m).sort((a, b) => b[1] - a[1]); };
@@ -916,7 +917,7 @@ async function genererRapport(type, ref) {
   doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('NEXORA', 14, 12); doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text("Secrétariat · École nationale d'administration de Côte d'Ivoire", 14, 18);
   doc.setFontSize(9); doc.text(`Généré le ${fmtDateHeure(new Date())} par ${etat.profil.nom}`, 196, 12, { align: 'right' });
   doc.setTextColor(...B); doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.text(`Rapport ${type === 'jour' ? 'du jour' : type === 'semaine' ? 'hebdomadaire' : type === 'mois' ? 'mensuel' : type === 'trimestre' ? 'trimestriel' : 'annuel'} · ${libelle}`, 14, 40);
-  doc.setTextColor(...G); doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.text(`Période du ${fmtDate(debut)} au ${fmtDate(fin)}`, 14, 46);
+  doc.setTextColor(...G); doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.text(`Courriers enregistrés du ${fmtDate(debut)} au ${fmtDate(fin)}`, 14, 46);
   // chiffres clés
   const kpis = [['Courriers arrivée', arr.length], ['Courriers départ', dep.length], ['En attente (total)', attente?.length || 0], ['En retard', retard], ['Délai moyen (j)', delai]];
   kpis.forEach(([l, v], i) => { const x = 14 + i * 37; doc.setFillColor(244, 247, 242); doc.roundedRect(x, 52, 34, 18, 2, 2, 'F'); doc.setTextColor(...V); doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text(String(v), x + 3, 61); doc.setTextColor(...G); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.text(l, x + 3, 67); });
