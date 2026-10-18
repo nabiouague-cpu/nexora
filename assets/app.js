@@ -565,11 +565,7 @@ async function vueEnregistrer(sens, existant = null) {
     try {
       const [{ data: contacts }, { data: apprentissage }] = await Promise.all([sb.from('contacts').select('nom').limit(2000), sb.from('apprentissage').select('*')]);
       const progression = (msg) => { vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau ambre" data-lecture="1">${esc(msg)}</div>`; };
-      let data = null;
-      if (etat.params?.ia_actif === '1') {
-        try { data = await lireAvecIA(fichier, sens, progression); } catch (e) { console.error(e); toast('Lecture IA indisponible (' + (e.message || e) + ') : lecture gratuite utilisée.', true); }
-      }
-      if (!data) data = await lireCourrier(fichier, { types: etat.types, services: etat.services, sens, contacts: contacts || [], apprentissage: apprentissage || [] }, progression);
+      const data = await lireCourrier(fichier, { types: etat.types, services: etat.services, sens, contacts: contacts || [], apprentissage: apprentissage || [] }, progression);
       lecture = data; appliquerLecture(data);
       const n = Object.keys(data.champs || {}).length;
       vue.querySelector('#etat-lecture').innerHTML = n ? `<div class="bandeau vert" title="${esc((data.indices || []).join(' · '))}">${ICONES.ok}Lecture terminée · ${n} champs détectés${data.a_verifier?.length ? ` · ${data.a_verifier.length} à vérifier` : ''}${data.indices?.length ? ' · ' + esc(data.indices.join(' · ')) : ''}</div>` : `<div class="bandeau ambre">Aucun champ reconnu : le scan est peut-être trop flou. Remplissez la fiche à la main.</div>`;
@@ -974,14 +970,6 @@ async function vueParametres() {
       ${gere ? `<form id="fcat" style="display:flex;gap:8px;margin-top:6px;align-items:flex-end"><div class="champ" style="flex:1"><label for="knom">Nouvelle catégorie</label><input id="knom" placeholder="Ex. Scolarité" required></div><button class="btn petit principal" type="submit">${ICONES.plus}Ajouter</button></form>` : ''}
       <div style="font-size:12px;color:var(--muet)">Un élément désactivé disparaît des listes mais reste sur les courriers déjà enregistrés.</div></section>
   </div>
-  <section class="carte"><div class="tete"><h2>Lecture automatique par l'IA</h2><span class="chip ${etat.params?.ia_actif === '1' ? 'vert' : 'gris'}">${etat.params?.ia_actif === '1' ? 'Activée' : 'Désactivée'}</span></div>
-    <div style="font-size:13px;color:var(--ink-soft)">Par défaut, NEXORA lit les scans avec un lecteur gratuit intégré (texte et OCR). En activant l'IA (Claude), le courrier est compris comme par une personne : résumé rédigé, action demandée complète avec la liste des pièces, dates et écriture manuscrite mieux lues. Coût : une fraction de centime par courrier avec Haiku. La clé reste sur le serveur et n'est jamais affichée.</div>
-    ${gere ? `<form id="fia" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
-      <label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="ia_actif" ${etat.params?.ia_actif === '1' ? 'checked' : ''} style="width:18px;height:18px"> Activer la lecture par l'IA</label>
-      <div class="champ"><label for="ia_modele">Modèle</label><select id="ia_modele">${[['claude-haiku-5-5', 'Claude Haiku 5.5 — le plus économique'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5 — plus précis'], ['claude-opus-5-5', 'Claude Opus 5.5 — le plus puissant']].map(([v, l]) => `<option value="${v}" ${(etat.params?.ia_modele || 'claude-haiku-5-5') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div class="champ" style="flex:1 1 260px"><label for="ia_cle">Clé API Anthropic ${etat.params?.ia_cle ? '<span class="lu-det">clé enregistrée</span>' : ''}</label><input id="ia_cle" type="password" placeholder="${etat.params?.ia_cle ? 'Laisser vide pour conserver la clé actuelle' : 'sk-ant-…'}" autocomplete="off"></div>
-      <button class="btn petit principal" type="submit">Enregistrer</button></form>` : ''}
-  </section>
   <section class="carte"><div class="tete"><h2>Signataires des courriers départ</h2><span class="chip gris">${(etat.signataires || []).length}</span></div>
     <div style="font-size:12px;color:var(--ink-soft)">Indiquez le nom de la personne en poste pour chaque fonction ; il apparaîtra dans le registre et les rapports.</div>
     ${(etat.signataires || []).map((g) => `<form data-sig="${g.id}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;padding:8px 0;border-bottom:1px solid var(--bord-leger)"><div style="flex:1 1 320px;font-weight:600">${esc(g.fonction)}${g.interimaire ? ' <span class="chip ambre">nom saisi à chaque courrier</span>' : ''}</div>${g.interimaire ? '' : `<div class="champ" style="flex:1 1 220px"><label class="sr" for="sn-${g.id}">Nom</label><input id="sn-${g.id}" value="${esc(g.nom || '')}" placeholder="Nom et prénoms"></div><button class="btn petit" type="submit">Enregistrer</button>`}</form>`).join('')}
@@ -996,13 +984,6 @@ async function vueParametres() {
   </div>`;
 
   vue.querySelector('#bdec').onclick = () => sb.auth.signOut();
-  vue.querySelector('#fia')?.addEventListener('submit', async (e) => {
-    e.preventDefault(); const actif = vue.querySelector('#ia_actif').checked; const cle = vue.querySelector('#ia_cle').value.trim(); const modele = vue.querySelector('#ia_modele').value;
-    if (actif && !cle && !etat.params?.ia_cle) return toast('Saisissez la clé API pour activer la lecture IA.', true);
-    const lignes = [{ cle: 'ia_actif', valeur: actif ? '1' : '0' }, { cle: 'ia_modele', valeur: modele }]; if (cle) lignes.push({ cle: 'ia_cle', valeur: cle });
-    const { error } = await sb.from('parametres').upsert(lignes.map((l) => ({ ...l, modifie_le: new Date().toISOString() }))); if (error) return toast(error.message, true);
-    await chargerProfil(); toast(actif ? 'Lecture IA activée.' : 'Lecture IA désactivée.'); router();
-  });
   vue.querySelectorAll('form[data-sig]').forEach((f) => f.onsubmit = async (e) => { e.preventDefault(); const nom = f.querySelector('input')?.value.trim() || null; const { error } = await sb.from('signataires').update({ nom }).eq('id', f.dataset.sig); if (error) return toast(error.message, true); await chargerProfil(); toast('Signataire mis à jour.'); router(); });
   vue.querySelector('#fnom').onsubmit = async (e) => { e.preventDefault(); const nom = vue.querySelector('#pnom').value.trim(); if (!nom) return; const { error } = await sb.from('profils').update({ nom }).eq('id', p.id); if (error) return toast(error.message, true); etat.profil.nom = nom; toast('Nom enregistré.'); router(); };
   vue.querySelector('#fmdp').onsubmit = async (e) => { e.preventDefault(); if (vue.querySelector('#n1').value !== vue.querySelector('#n2').value) return toast('Les deux mots de passe diffèrent.', true); const { error } = await sb.auth.updateUser({ password: vue.querySelector('#n1').value }); if (error) return toast(error.message, true); toast('Mot de passe mis à jour.'); e.target.reset(); };
