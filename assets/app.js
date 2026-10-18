@@ -154,7 +154,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-020';
+const APP_VERSION = '2026-10-18-021';
 const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
@@ -738,7 +738,7 @@ async function vueCourrier(id) {
         ${champ('Type', esc(c.type_nom))}${champ(estArr ? 'Destinataire interne' : 'Service émetteur', esc(c.service_nom_complet || c.service_nom))}
         ${champ('Catégorie', esc(c.categorie_nom))}${champ('Urgence', URGENCES[c.urgence])}
         ${estArr ? '' : champ('Signataire', esc(c.signataire || c.signataire_fonction)) + champ("Mode d'envoi", MODES[c.mode_envoi])}
-        ${champ('Échéance', fmtDate(c.echeance))}${champ('Action demandée', esc(c.action_demandee))}
+        ${champ('Échéance', fmtDate(c.echeance))}${champ('Action demandée', c.action_demandee && c.action_demandee.includes(' ; ') ? (() => { const [tete, reste] = c.action_demandee.split(/\s*:\s*(.+)/); return `${esc(tete)} :<ul style="margin:6px 0 0;padding-left:20px">${(reste || '').split(' ; ').map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`; })() : esc(c.action_demandee))}
         ${lie ? champ('En réponse à', `<a href="#/courrier/${lie.id}">${esc(lie.numero_ordre)}</a> · ${esc(lie.objet)}`) : c.reference_liee ? champ('En réponse au courrier', esc(c.reference_liee)) : ''}
         ${(reponses || []).length ? champ('Réponses', reponses.map((r) => `<a href="#/courrier/${r.id}">${esc(r.numero_ordre)}</a> (${fmtDate(r.date_evenement)})`).join('<br>')) : ''}
       </dl>

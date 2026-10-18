@@ -123,9 +123,22 @@ function devinerType(texte, types, sens) {
   for (const [nom, re] of REGLES_TYPE) if (re.test(t)) { const typ = types.find((x) => normaliser(x.nom) === normaliser(nom) && (x.sens === 'les_deux' || x.sens === sens)); if (typ) return typ.nom; }
   const l = types.find((x) => normaliser(x.nom) === 'lettre'); return l ? l.nom : null;
 }
+// Liste à puces qui suit « ci-après », « ci-dessous », « suivants » : les éléments sont restitués un par un
+function extraireListe(texte) {
+  const m = texte.match(/(?:ci-apr[èe]s|ci-dessous|suivant(?:e)?s?)\s*[;:.]?\s*\n((?:\s*[-–•*·]\s*[^\n]+\n?){2,})/i);
+  if (!m) return null;
+  const items = m[1].split('\n').map((l) => l.replace(/^\s*[-–•*·]\s*/, '').replace(/\s*[;.,]\s*$/, '').trim()).filter((l) => l.length > 2);
+  return items.length >= 2 ? items.map((x) => x.charAt(0).toUpperCase() + x.slice(1)) : null;
+}
 function devinerAction(texte, type) {
   const t = texte.replace(/\s+/g, ' ');
   const tl = t.toLowerCase();
+  const liste = extraireListe(texte);
+  if (liste) {
+    const avant = (t.match(/(?:solliciter|demander|prie de bien vouloir|saurai[s]? gré de bien vouloir|bien vouloir)[^.;]{0,80}?(mise à disposition|transmission|communication|envoi|fourniture|production)[^.;]{0,60}?(?:ci-apr[èe]s|ci-dessous|suivant)/i) || [])[1];
+    const tete = avant ? avant.charAt(0).toUpperCase() + avant.slice(1) + ' de' : 'Transmettre';
+    return `${tete} : ${liste.join(' ; ')}`;
+  }
   // ce que le courrier demande explicitement
   const m = t.match(/(?:vous saurai[s]? gré de bien vouloir|vous prie de bien vouloir|voudrais?-je[^.;]{0,40}solliciter[^.;]{0,30}|prière de bien vouloir|bien vouloir|solliciter aupr[èé]s de vous)\s+([^.;]{8,140})/i);
   if (m) { let a = m[1].trim().replace(/^(?:la |le |l'|les |de |d')/, '').replace(/\bvotre\b/gi, 'sa').replace(/\bvous\b/gi, 'lui'); a = a.charAt(0).toUpperCase() + a.slice(1); if (/^(mise|liste|transmission|communication)/i.test(a)) a = 'Transmettre : ' + a.charAt(0).toLowerCase() + a.slice(1); if (a.length > 110) a = a.slice(0, 110).replace(/\s+\S*$/, '') + '…'; return a; }
