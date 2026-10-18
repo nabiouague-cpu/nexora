@@ -152,7 +152,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-011';
+const APP_VERSION = '2026-10-18-012';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -447,7 +447,9 @@ async function vueEnregistrer(sens) {
         <div class="champ"><label for="devt">${estArr ? 'Date de réception' : "Date d'envoi"}</label><input id="devt" type="date" value="${aujourdhui()}" required></div>
         <div class="champ span2"><label for="objet">Objet <span id="d-objet"></span></label><input id="objet" required></div>
         <div class="champ"><label for="type">Type de courrier <span id="d-type"></span></label><select id="type"><option value="">—</option>${opt(etat.types.filter((t) => t.sens === 'les_deux' || t.sens === sens))}</select></div>
-        <div class="champ"><label for="service">${estArr ? 'Destinataire interne' : 'Service émetteur'} <span id="d-service"></span></label><select id="service"><option value="">—</option>${etat.services.filter((x) => !x.parent_id).map((x) => `<option value="${x.id}" ${x.id === etat.profil.service_id ? 'selected' : ''}>${esc(x.nom)}${etat.services.some((y) => y.parent_id === x.id) ? ' ›' : ''}</option>`).join('')}</select><input type="hidden" id="service_final"><span class="aide" id="service_aide"></span></div>
+        <div class="champ"><label for="service">${estArr ? 'Destinataire interne' : 'Service émetteur'} <span id="d-service"></span></label>
+          <div style="display:flex;gap:8px;align-items:center"><select id="service" style="flex:1 1 50%"><option value="">—</option>${etat.services.filter((x) => !x.parent_id).map((x) => `<option value="${x.id}" ${x.id === etat.profil.service_id ? 'selected' : ''}>${esc(x.nom)}${etat.services.some((y) => y.parent_id === x.id) ? ' ›' : ''}</option>`).join('')}</select><select id="service2" aria-label="Service de la direction" style="flex:1 1 50%;display:none"></select></div>
+          <input type="hidden" id="service_final"></div>
         <div class="champ"><label for="urgence">Niveau d'urgence <span id="d-urgence"></span></label><select id="urgence">${Object.entries(URGENCES).map(([k, l]) => `<option value="${k}" ${k === 'normal' ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="champ"><label for="cat">Catégorie</label><select id="cat"><option value="">—</option>${opt(etat.categories)}</select></div>
         ${estArr ? '' : `<div class="champ"><label for="sign">Signataire</label><input id="sign" placeholder="Qui signe le courrier"></div>
@@ -465,19 +467,17 @@ async function vueEnregistrer(sens) {
   </div>
   <style>@media (max-width:980px){.deux-col{grid-template-columns:1fr !important}}</style>`;
 
-  // Direction → sous-service (fenêtre)
-  const selSrv = vue.querySelector('#service'), srvFinal = vue.querySelector('#service_final'), srvAide = vue.querySelector('#service_aide');
-  const choisirSousService = (direction) => {
-    const enfants = etat.services.filter((y) => y.parent_id === direction.id);
-    const m = modale(`<h2>${esc(direction.nom)}</h2><p style="margin:0;font-size:13px;color:var(--ink-soft)">À quel service de cette direction ce courrier est-il destiné ?</p>
-      <div class="champ"><label for="ssrv">Service</label><select id="ssrv"><option value="${direction.id}">— La direction elle-même —</option>${enfants.map((e) => `<option value="${e.id}">${esc(e.nom)}</option>`).join('')}</select></div>
-      <div class="ligne-boutons"><button class="btn" id="mnon" type="button">Retour</button><button class="btn principal" id="moui" type="button">Valider</button></div>`);
-    const fermer = (val) => { m.remove(); if (val) { srvFinal.value = val; const x = etat.services.find((y) => y.id === val); srvAide.textContent = x && x.parent_id ? `${direction.nom} › ${x.nom}` : direction.nom; } };
-    m.querySelector('#mnon').onclick = () => { fermer(direction.id); };
-    m.querySelector('#moui').onclick = () => fermer(m.querySelector('#ssrv').value);
+  // Direction → seconde liste déroulante juste à côté (comme un sous-menu)
+  const selSrv = vue.querySelector('#service'), selSrv2 = vue.querySelector('#service2'), srvFinal = vue.querySelector('#service_final');
+  const majSousListe = (sousId) => {
+    const d = etat.services.find((y) => y.id === selSrv.value); const enfants = d ? etat.services.filter((y) => y.parent_id === d.id) : [];
+    if (!enfants.length) { selSrv2.style.display = 'none'; selSrv2.innerHTML = ''; srvFinal.value = selSrv.value; return; }
+    selSrv2.innerHTML = `<option value="${d.id}">— Choisir le service —</option>` + enfants.map((e) => `<option value="${e.id}" ${e.id === sousId ? 'selected' : ''}>${esc(e.nom)}</option>`).join('');
+    selSrv2.style.display = ''; srvFinal.value = sousId || d.id; if (!sousId) selSrv2.focus();
   };
-  selSrv.onchange = () => { const d = etat.services.find((y) => y.id === selSrv.value); srvFinal.value = selSrv.value; srvAide.textContent = ''; if (d && etat.services.some((y) => y.parent_id === d.id)) choisirSousService(d); };
-  if (selSrv.value) srvFinal.value = selSrv.value;
+  selSrv.onchange = () => majSousListe(null);
+  selSrv2.onchange = () => { srvFinal.value = selSrv2.value || selSrv.value; };
+  majSousListe(null);
   vue.querySelector('#sa').onclick = () => naviguer('#/enregistrer/arrivee');
   const reprise = sessionStorage.getItem('nexora_lecture');
   if (reprise) { sessionStorage.removeItem('nexora_lecture'); try { const { lecture: r, nom } = JSON.parse(reprise); lecture = r; setTimeout(() => { appliquerLecture(r); vue.querySelector('#etat-lecture').innerHTML = `<div class="bandeau vert">${ICONES.ok}Lecture reprise (${esc(nom || 'document')}) · pensez à rattacher à nouveau le scan</div>`; }, 50); } catch (e) { /* ignore */ } }
@@ -538,7 +538,7 @@ async function vueEnregistrer(sens) {
     if (ch.urgence && URGENCES[ch.urgence]) mettre('urgence', ch.urgence);
     const typ = etat.types.find((t) => t.nom.toLowerCase() === String(ch.type || '').toLowerCase()); if (typ) mettre('type', typ.id);
     const srv = etat.services.find((s) => s.nom.toLowerCase() === String(ch.service || '').toLowerCase());
-    if (srv) { const parent = srv.parent_id ? etat.services.find((y) => y.id === srv.parent_id) : null; mettre('service', parent ? parent.id : srv.id); vue.querySelector('#service_final').value = srv.id; vue.querySelector('#service_aide').textContent = parent ? `${parent.nom} › ${srv.nom}` : ''; }
+    if (srv) { const parent = srv.parent_id ? etat.services.find((y) => y.id === srv.parent_id) : null; mettre('service', parent ? parent.id : srv.id); majSousListe(parent ? srv.id : null); if (parent) marquer('service2', av.has('service') ? 'verif' : 'ok'); }
     if (ch.categorie_id) mettre('cat', ch.categorie_id);
     if (ch.montant && !vue.querySelector('#obs').value) vue.querySelector('#obs').value = `Montant : ${ch.montant}`;
     const fs = vue.querySelector('#fevs'); const evs = r.evenements || [];
