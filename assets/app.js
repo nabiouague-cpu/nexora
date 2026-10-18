@@ -152,7 +152,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-013';
+const APP_VERSION = '2026-10-18-014';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
   const p = etat.profil || {};
@@ -483,21 +483,22 @@ async function vueEnregistrer(sens) {
   // --- Brouillon local : rien ne se perd tant que le formulaire n'est pas fermé volontairement
   const CLE_BROUILLON = 'nexora_brouillon_' + sens;
   const champsSauvables = ['contact', 'ref', 'dcour', 'devt', 'objet', 'type', 'service', 'service2', 'service_final', 'urgence', 'cat', 'sign', 'mode', 'lie', 'echeance', 'resume', 'action', 'obs'];
-  const sauverBrouillon = () => { try { const d = {}; champsSauvables.forEach((id) => { const el = vue.querySelector('#' + id); if (el) d[id] = el.value; }); d.conf = vue.querySelector('#conf').checked; d.lecture = lecture; d.fichierNom = fichier?.name || null; d.quand = Date.now(); localStorage.setItem(CLE_BROUILLON, JSON.stringify(d)); } catch (e) { /* ignore */ } };
+  const sauverBrouillon = () => { try { const d = {}; champsSauvables.forEach((id) => { const el = vue.querySelector('#' + id); if (el) d[id] = el.value; }); d.conf = vue.querySelector('#conf').checked; d.lecture = lecture; d.fichierNom = fichier?.name || null; d.scanTemp = scanTemp; d.quand = Date.now(); localStorage.setItem(CLE_BROUILLON, JSON.stringify(d)); } catch (e) { /* ignore */ } };
   const effacerBrouillon = () => { try { localStorage.removeItem(CLE_BROUILLON); } catch (e) { /* ignore */ } };
   window.__effacerBrouillon = effacerBrouillon;
   vue.querySelector('#ffiche').addEventListener('input', sauverBrouillon);
   vue.querySelector('#ffiche').addEventListener('change', sauverBrouillon);
   try {
     const b = JSON.parse(localStorage.getItem(CLE_BROUILLON) || 'null');
-    if (b && Object.values(b).some((v) => typeof v === 'string' && v && !/^\d{4}-\d{2}-\d{2}$/.test(v))) {
+    if (b && (b.scanTemp || Object.values(b).some((v) => typeof v === 'string' && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)))) {
       champsSauvables.forEach((id) => { const el = vue.querySelector('#' + id); if (el && b[id] !== undefined && id !== 'service2') el.value = b[id]; });
       if (b.service) { selSrv.value = b.service; majSousListe(b.service_final && b.service_final !== b.service ? b.service_final : null); }
       vue.querySelector('#conf').checked = !!b.conf; if (b.lecture) lecture = b.lecture;
       const bando = document.createElement('div'); bando.className = 'bandeau ambre'; bando.style.marginBottom = '4px';
-      bando.innerHTML = `Saisie précédente restaurée (${esc(fmtDateHeure(new Date(b.quand)))}).${b.fichierNom ? ` Scan à rattacher de nouveau : <b>${esc(b.fichierNom)}</b>.` : ''} <button type="button" class="btn petit" id="bvider" style="margin-left:6px">Vider le formulaire</button>`;
+      bando.innerHTML = `Saisie précédente restaurée (${esc(fmtDateHeure(new Date(b.quand)))}).${b.scanTemp?.nom ? ` Scan conservé : <b>${esc(b.scanTemp.nom)}</b>.` : b.fichierNom ? ` Scan à rattacher de nouveau : <b>${esc(b.fichierNom)}</b>.` : ''} <button type="button" class="btn petit" id="bvider" style="margin-left:6px">Vider le formulaire</button>`;
       vue.querySelector('#ffiche').prepend(bando);
-      bando.querySelector('#bvider').onclick = () => { effacerBrouillon(); naviguer('#/enregistrer/' + sens); };
+      bando.querySelector('#bvider').onclick = async () => { if (b.scanTemp?.chemin) await sb.storage.from('courriers').remove([b.scanTemp.chemin]).catch(() => {}); effacerBrouillon(); naviguer('#/enregistrer/' + sens); };
+      if (b.scanTemp) restaurerScan(b.scanTemp);
     }
   } catch (e) { /* ignore */ }
   const reprise = sessionStorage.getItem('nexora_lecture');
@@ -507,11 +508,31 @@ async function vueEnregistrer(sens) {
   sb.from('contacts').select('nom').order('nom').limit(500).then(({ data }) => { vue.querySelector('#lcontacts').innerHTML = (data || []).map((c) => `<option value="${esc(c.nom)}">`).join(''); });
 
   const zone = vue.querySelector('#zone'), inputF = vue.querySelector('#fich'), info = vue.querySelector('#fichier-info'), blire = vue.querySelector('#blire'), apercu = vue.querySelector('#apercu');
-  const prendreFichier = (f) => {
+  let scanTemp = null; // { chemin, nom, type, taille } : scan déjà envoyé dans brouillons/
+  const afficherFichier = (nom, taille, etatTxt) => { info.innerHTML = `<div class="fichier">${ICONES.fichier}<div style="min-width:0"><div class="n">${esc(nom)}</div><div class="s">${taille ? (taille / 1024 / 1024).toFixed(2) + ' Mo · ' : ''}${etatTxt}</div></div></div>`; };
+  const prendreFichier = async (f) => {
     if (!f) return; if (f.size > 25 * 1024 * 1024) return toast('Fichier trop volumineux (25 Mo max).', true);
-    fichier = f; blire.disabled = false; sauverBrouillon();
-    info.innerHTML = `<div class="fichier">${ICONES.fichier}<div style="min-width:0"><div class="n">${esc(f.name)}</div><div class="s">${(f.size / 1024 / 1024).toFixed(2)} Mo</div></div></div>`;
+    fichier = f; blire.disabled = false;
+    afficherFichier(f.name, f.size, 'envoi en cours…');
     apercu.innerHTML = f.type.startsWith('image/') ? `<img src="${URL.createObjectURL(f)}" alt="Aperçu du scan" style="width:100%;border-radius:10px;border:1px solid var(--bord)">` : f.type === 'application/pdf' ? `<iframe src="${URL.createObjectURL(f)}" title="Aperçu du PDF" style="width:100%;height:560px;border:1px solid var(--bord);border-radius:10px"></iframe>` : '';
+    // envoi immédiat dans le dossier temporaire : le scan est attaché au brouillon dès maintenant
+    try {
+      if (scanTemp?.chemin) await sb.storage.from('courriers').remove([scanTemp.chemin]).catch(() => {});
+      const ext = (f.name.split('.').pop() || 'pdf').toLowerCase(); const id = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+      const chemin = `brouillons/${etat.profil.id}/${id}/scan.${ext}`;
+      const { error } = await sb.storage.from('courriers').upload(chemin, f, { contentType: f.type, upsert: true }); if (error) throw error;
+      scanTemp = { chemin, nom: f.name, type: f.type, taille: f.size }; afficherFichier(f.name, f.size, 'scan sécurisé ✓');
+    } catch (e) { console.error(e); scanTemp = null; afficherFichier(f.name, f.size, 'non sauvegardé (hors ligne ?) — sera envoyé à la validation'); }
+    sauverBrouillon();
+  };
+  // Restauration d'un scan temporaire après rechargement
+  const restaurerScan = async (st) => {
+    if (!st?.chemin) return;
+    scanTemp = st; afficherFichier(st.nom, st.taille, 'scan restauré ✓');
+    const { data } = await sb.storage.from('courriers').createSignedUrl(st.chemin, 3600);
+    if (!data?.signedUrl) { scanTemp = null; afficherFichier(st.nom, st.taille, 'introuvable sur le serveur : choisissez-le à nouveau'); return; }
+    apercu.innerHTML = st.type?.startsWith('image/') ? `<img src="${data.signedUrl}" alt="Aperçu du scan" style="width:100%;border-radius:10px;border:1px solid var(--bord)">` : `<iframe src="${data.signedUrl}" title="Aperçu du PDF" style="width:100%;height:560px;border:1px solid var(--bord);border-radius:10px"></iframe>`;
+    try { const r = await fetch(data.signedUrl); const b = await r.blob(); fichier = new File([b], st.nom, { type: st.type || b.type }); blire.disabled = false; } catch (e) { /* lecture auto indisponible sans le fichier */ }
   };
   inputF.onchange = () => prendreFichier(inputF.files[0]);
   ['dragenter', 'dragover'].forEach((ev) => zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.add('actif'); }));
@@ -585,12 +606,15 @@ async function vueEnregistrer(sens) {
       };
       const { data: c, error } = await sb.from('courriers').insert(ligne).select('*').single(); if (error) throw error;
       if (statutFinal !== 'brouillon') apprendre(c).catch(() => {});
-      // scan
-      if (fichier) {
-        const d = new Date(c.date_evenement); const ext = fichier.name.split('.').pop().toLowerCase();
+      // scan : déplacé du dossier temporaire vers le dossier définitif du courrier
+      if (scanTemp?.chemin || fichier) {
+        const d = new Date(c.date_evenement); const nom = scanTemp?.nom || fichier.name; const type = scanTemp?.type || fichier.type; const taille = scanTemp?.taille || fichier.size;
+        const ext = (nom.split('.').pop() || 'pdf').toLowerCase();
         const chemin = `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${sens === 'arrivee' ? 'arrivees' : 'departs'}/${c.id}/scan.${ext}`;
-        const { error: eu } = await sb.storage.from('courriers').upload(chemin, fichier, { contentType: fichier.type, upsert: true }); if (eu) throw eu;
-        await sb.from('pieces_jointes').insert({ courrier_id: c.id, nom_fichier: fichier.name, chemin_storage: chemin, type_mime: fichier.type, taille_octets: fichier.size, cree_par: etat.profil.id });
+        let ok = false;
+        if (scanTemp?.chemin) { const { error: em } = await sb.storage.from('courriers').move(scanTemp.chemin, chemin); ok = !em; }
+        if (!ok) { if (!fichier) throw new Error('Scan introuvable : choisissez le fichier à nouveau.'); const { error: eu } = await sb.storage.from('courriers').upload(chemin, fichier, { contentType: type, upsert: true }); if (eu) throw eu; }
+        await sb.from('pieces_jointes').insert({ courrier_id: c.id, nom_fichier: nom, chemin_storage: chemin, type_mime: type, taille_octets: taille, cree_par: etat.profil.id });
       }
       // événements détectés
       const cases = [...vue.querySelectorAll('[data-ev]:checked')];
