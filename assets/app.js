@@ -39,7 +39,7 @@ const chipStatut = (c) => {
   const [lib, cls] = STATUTS[c.statut] || [c.statut, 'gris'];
   return `<span class="chip ${cls}">${lib}</span>`;
 };
-const numero = (c) => `<span class="num ${c.sens === 'depart' ? 'dep' : ''}">${esc(c.numero_ordre || 'Brouillon')}</span>`;
+const numero = (c) => `<span class="num ${c.sens === 'depart' ? 'dep' : ''}">${esc(c.numero_ordre || (c.statut === 'annule' ? (c.ancien_numero ? 'ex-' + c.ancien_numero : 'Annulé') : 'Brouillon'))}</span>`;
 
 let toastTimer;
 function toast(msg, erreur = false) {
@@ -154,7 +154,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-022';
+const APP_VERSION = '2026-10-18-023';
 const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
@@ -726,7 +726,7 @@ async function vueCourrier(id) {
   const statutsPossibles = estArr ? ['recu', 'transmis', 'a_traiter', 'traite', 'classe'] : ['envoye', 'classe'];
 
   vue.innerHTML = `
-  <header class="entete"><div class="titre"><div class="fil"><a href="#/${estArr ? 'arrivees' : 'departs'}" style="text-decoration:none">${estArr ? 'Arrivées' : 'Départs'}</a> · ${c.numero_ordre || 'Brouillon'}</div><h1 style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">${esc(c.numero_ordre || 'Brouillon')} ${chipStatut(c)}${c.confidentiel ? '<span class="chip corail">Confidentiel</span>' : ''}</h1><div style="font-size:15px;margin-top:4px">${esc(c.objet)}</div></div>
+  <header class="entete"><div class="titre"><div class="fil"><a href="#/${estArr ? 'arrivees' : 'departs'}" style="text-decoration:none">${estArr ? 'Arrivées' : 'Départs'}</a> · ${c.numero_ordre || 'Brouillon'}</div><h1 style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">${esc(c.numero_ordre || (c.statut === 'annule' ? 'Annulé' + (c.ancien_numero ? ' (ex-' + c.ancien_numero + ')' : '') : 'Brouillon'))} ${chipStatut(c)}${c.confidentiel ? '<span class="chip corail">Confidentiel</span>' : ''}</h1><div style="font-size:15px;margin-top:4px">${esc(c.objet)}</div></div>
     <div class="actions">${peutEcrire() && c.statut !== 'annule' ? `${c.statut === 'brouillon' ? `<button class="btn principal" id="bvalider">Valider et attribuer le n°</button>` : `<select id="sstatut" class="filtre-select" aria-label="Changer le statut">${statutsPossibles.map((s) => `<option value="${s}" ${c.statut === s ? 'selected' : ''}>${STATUTS[s][0]}</option>`).join('')}</select>`}
       <a class="btn" href="#/modifier/${c.id}">Modifier</a>${estArr && c.statut !== 'brouillon' ? `<a class="btn vert" href="#/enregistrer/depart">Répondre (départ)</a>` : ''}<button class="btn danger" id="bannuler">Annuler le courrier</button>` : ''}</div></header>
   <div class="grille3">
@@ -760,7 +760,7 @@ async function vueCourrier(id) {
   vue.querySelector('#sstatut')?.addEventListener('change', async (e) => { const { error } = await sb.from('courriers').update({ statut: e.target.value }).eq('id', id); if (error) return toast(error.message, true); toast('Statut mis à jour.'); router(); });
   vue.querySelector('#brestaurer')?.addEventListener('click', async () => { const { error } = await sb.from('courriers').update({ statut: estArr ? 'recu' : 'envoye', annule_motif: null, annule_le: null }).eq('id', id); if (error) return toast(error.message, true); toast('Courrier restauré dans le registre.'); router(); });
   vue.querySelector('#bannuler')?.addEventListener('click', () => {
-    const m = modale(`<h2>Annuler ce courrier</h2><p style="margin:0;color:var(--muet);font-size:13px">Le courrier disparaît du registre et des rapports. Il reste retrouvable avec le filtre « Statut : Annulé » et peut être restauré.</p><div class="champ"><label for="motif">Motif de l'annulation</label><input id="motif" required></div><div class="ligne-boutons"><button class="btn" id="mnon">Retour</button><button class="btn danger" id="moui">Confirmer l'annulation</button></div>`);
+    const m = modale(`<h2>Annuler ce courrier</h2><p style="margin:0;color:var(--muet);font-size:13px">Le courrier disparaît du registre et des rapports, et son numéro d'ordre est libéré pour le prochain courrier. Il reste retrouvable avec le filtre « Statut : Annulé » et peut être restauré (il recevra alors un nouveau numéro).</p><div class="champ"><label for="motif">Motif de l'annulation</label><input id="motif" required></div><div class="ligne-boutons"><button class="btn" id="mnon">Retour</button><button class="btn danger" id="moui">Confirmer l'annulation</button></div>`);
     m.querySelector('#mnon').onclick = () => m.remove();
     m.querySelector('#moui').onclick = async () => { const motif = m.querySelector('#motif').value.trim(); if (!motif) return toast('Indiquez le motif.', true); const { error } = await sb.from('courriers').update({ statut: 'annule', annule_motif: motif, annule_le: new Date().toISOString() }).eq('id', id); if (error) return toast(error.message, true); m.remove(); toast('Courrier annulé et retiré du registre.'); naviguer('#/' + (estArr ? 'arrivees' : 'departs')); };
   });

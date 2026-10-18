@@ -91,7 +91,7 @@ function reconnaitreContact(enTete, contacts) {
 }
 
 // ---------- Reconnaissance des champs ----------
-const CORRECTIONS_OCR = [[/ao[dtiîu]{1,3}t\b/gi, 'août'], [/a[o0]ut\b/gi, 'août'], [/f[ée]vr?\./gi, 'fév.'], [/([a-z])¢([a-z])/g, '$1è$2'], [/([a-z])€([a-z])/g, '$1è$2'], [/(\d)°(?=\s)/g, '$1e'], [/\bl[’']ENA\b/g, "l'ENA"], [/\bN[o0]t?\s*\//g, 'N° /'], [/\baupr[ée]s\b/gi, 'auprès'], [/\bapr[ée]s\b/gi, 'après'], [/\bd[ée]s\s+(?=\d)/gi, 'dès '], [/\bdipl[o06]mes?\b/gi, (m) => m.replace(/[o06]/, 'ô')]];
+const CORRECTIONS_OCR = [[/ao[dtiîu]{1,3}t\b/gi, 'août'], [/a[o0]ut\b/gi, 'août'], [/f[ée]vr?\./gi, 'fév.'], [/([a-z])¢([a-z])/g, '$1è$2'], [/([a-z])€([a-z])/g, '$1è$2'], [/(\d)°(?=\s)/g, '$1e'], [/\bl[’']ENA\b/g, "l'ENA"], [/\bN[o0]t?\s*\//g, 'N° /'], [/\baupr[ée]s\b/gi, 'auprès'], [/\bapr[ée]s\b/gi, 'après'], [/\bd[ée]s\s+(?=\d)/gi, 'dès '], [/\bdipl[o06]mes?\b/gi, (m) => m.replace(/[o06]/, 'ô')], [/\b[ée]l[ée]ves\b/gi, 'élèves'], [/\b[ée]l[ée]ve\b/gi, 'élève'], [/\bfili[èe]re\b/g, 'filière'], [/ \ba (la|l'|disposition|partir|compter|votre|vos|cet|cette|ce)\b/g, ' à $1']];
 const nettoyer = (s) => { let t = s.replace(/[|_~¬]+/g, ' ').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim(); for (const [re, rep] of CORRECTIONS_OCR) t = t.replace(re, rep); return t; };
 const MOIS_ABR = { janv: 1, jan: 1, fev: 2, fév: 2, fevr: 2, févr: 2, mars: 3, mar: 3, avr: 4, avril: 4, mai: 5, juin: 6, juil: 7, juill: 7, aout: 8, août: 8, sept: 9, sep: 9, oct: 10, nov: 11, dec: 12, déc: 12 };
 function trouverDates(texte) {
@@ -264,12 +264,6 @@ export function analyserTexte(texteBrut, contexte, meta = {}) {
   }
   if (!champs.echeance && evenements[0]) champs.echeance = evenements[0].debut.slice(0, 10);
 
-  // --- Résumé
-  const corpsTexte = texte.slice(posObjet).replace(/\s+/g, ' ');
-  const phrases = (corpsTexte.match(/[^.!?;]{25,420}[.!?;]/g) || []).map((p) => p.trim().replace(/^(?:madame|monsieur|mesdames|messieurs)[^,]{0,60},\s*/i, ''));
-  const utiles = phrases.filter((p) => !/^\s*(objet|réf|veuillez agréer|je vous prie de croire|nous vous prions)/i.test(p) && !/considération distinguée|salutations|haute considération/i.test(p)).slice(0, 3);
-  if (utiles.length) { let r = utiles.join(' ').replace(/^(?:réf\s*:[^.]*\.\s*)/i, '').trim(); if (r.length > 380) r = r.slice(0, 380).replace(/\s+\S*$/, '') + '…'; champs.resume = r; }
-
   // --- Signataire et fonction (départ)
   const fin = lignes.slice(-10);
   const sig = fin.find((l) => /^[A-ZÉÈÀ][A-ZÉÈÀ' -]{2,}\s+[A-ZÉ][a-zéèàï' -]{2,}$/.test(l.trim())) || fin.find((l) => /^[A-ZÉ][a-zéè]+\s+[A-ZÉÈÀ' -]{3,}$/.test(l.trim()));
@@ -290,6 +284,39 @@ export function analyserTexte(texteBrut, contexte, meta = {}) {
   if (appris?.categorie_id) champs.categorie_id = appris.categorie_id;
   if (appris) indices.push('type et service repris de vos enregistrements précédents');
   if (mode === 'ocr') indices.push(`qualité OCR ${Math.round(confiance)} %`);
+
+  // --- Résumé : composé à partir de ce que le courrier FAIT (accuse réception, transmet, informe, demande, invite), pas de phrases recopiées
+  const resumeParties = [];
+  (() => {
+    const T = texte.slice(posObjet).replace(/\s+/g, ' ');
+    const couper = (x, n = 140) => { x = x.replace(/\s+/g, ' ').replace(/[,;:]\s*$/, '').trim(); return x.length > n ? x.slice(0, n).replace(/\s+\S*$/, '') + '…' : x; };
+    const tiers = (x) => x.replace(/\bvotre\b/gi, 'sa').replace(/\bvos\b/gi, 'ses').replace(/\bvous\b/gi, 'lui').replace(/\bnotre\b/gi, 'son').replace(/\bnos\b/gi, 'ses').replace(/\bma\b/gi, 'sa').replace(/\bmon\b/gi, 'son').replace(/\bmes\b/gi, 'ses').replace(/\bje\b/gi, 'il');
+    const qui = sensEffectif === 'depart' ? "L'EGAD" : (champs.contact ? champs.contact : "L'expéditeur");
+    const aQui = sensEffectif === 'depart' ? (champs.contact ? ` à ${champs.contact}` : '') : " à l'EGAD";
+    const objetTxt = champs.objet ? ` au sujet de « ${couper(champs.objet, 110)} »` : '';
+    resumeParties.push(`${qui} écrit${aQui}${objetTxt}.`);
+    if (champs.reference_liee) resumeParties.push(`Ce courrier répond à la lettre ${champs.reference_liee}${champs.reference_liee_date ? ' du ' + champs.reference_liee_date : ''}.`);
+    let m;
+    if ((m = T.match(/accuser? réception de ([^.;]{10,160})/i))) { let ar = m[1].replace(/\s*,?\s*par laquelle[\s\S]*$/i, '').replace(/ci-dessus référencée?/i, 'référencée'); resumeParties.push(`Il accuse réception de ${couper(tiers(ar), 90)}.`); }
+    if ((m = T.match(/(?:trouver|trouverez) ci-joint,? ([^.;]{5,160})/i) || T.match(/ci-joint,? ([^.;]{5,160})/i))) resumeParties.push(`Il transmet en pièce jointe ${couper(tiers(m[1]))}.`);
+    if ((m = T.match(/(?:porter à votre connaissance|vous informer|vous informe|vous informons|vous faire savoir|vous signaler|vous rappeler)\s+(?:que\s+|qu')?([^.;]{10,200})/i))) resumeParties.push(`Il informe que ${couper(tiers(m[1]), 180)}.`);
+    if (champs.action_demandee) resumeParties.push(`Il demande de ${couper(champs.action_demandee.replace(/^Transmettre : /, 'transmettre : ').replace(/ ; /g, ', ').replace(/: ([A-ZÉ])/, (x, c) => ': ' + c.toLowerCase()).replace(/, ([A-ZÉ])/g, (x, c) => ', ' + c.toLowerCase()), 280)}.`);
+    else if ((m = T.match(/(?:solliciter|sollicite|demande|demandons|prie de bien vouloir|saurai[s]? gré de bien vouloir)\s+(?:auprès de vous\s+)?([^.;]{8,160})/i))) resumeParties.push(`Il demande ${couper(tiers(m[1]))}.`);
+    if ((m = T.match(/(?:convier|inviter|invite|convie)\s+(?:à|a)\s+([^.;]{8,160})/i))) resumeParties.push(`Il invite à ${couper(tiers(m[1]))}.`);
+    const evs = evenements.filter((e) => e.type === 'reunion').slice(0, 2).map((e) => { const d = new Date(e.debut); let t = e.titre.toLowerCase().replace(/^les? /, '').replace(/\s+(débuteront|débutera|commenceront|aura lieu|se tiendra).*$/, ''); if (t.length > 60) t = t.slice(0, 60).replace(/\s+\S*$/, ''); return `${t} le ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}${e.debut.slice(11, 16) !== '09:00' ? ' à ' + e.debut.slice(11, 16).replace(':', 'h') : ''}`; });
+    const periode = evenements.find((e) => e.fin);
+    if (periode) { const d1 = periode.debut.slice(0, 10).split('-').reverse().join('/'), d2 = periode.fin.slice(0, 10).split('-').reverse().join('/'); evs.push(`une disponibilité est demandée du ${d1} au ${d2}`); }
+    if (evs.length) resumeParties.push(`À retenir : ${evs.join(' ; ')}.`);
+    if (champs.echeance && !periode) resumeParties.push(`Réponse attendue avant le ${champs.echeance.split('-').reverse().join('/')}.`);
+    if (champs.montant) resumeParties.push(`Montant : ${champs.montant}.`);
+  })();
+  if (resumeParties.length > 1) champs.resume = resumeParties.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(' ');
+  else {
+    const corpsTexte = texte.slice(posObjet).replace(/\s+/g, ' ');
+    const phrases = (corpsTexte.match(/[^.!?;]{25,420}[.!?;]/g) || []).map((p) => p.trim().replace(/^(?:madame|monsieur|mesdames|messieurs)[^,]{0,60},\s*/i, ''));
+    const utiles = phrases.filter((p) => !/^\s*(objet|réf|veuillez agréer|je vous prie de croire|nous vous prions)/i.test(p) && !/considération distinguée|salutations|haute considération/i.test(p)).slice(0, 2);
+    if (utiles.length) champs.resume = (resumeParties[0] ? resumeParties[0] + ' ' : '') + utiles.join(' ').slice(0, 300);
+  }
 
   Object.keys(champs).forEach((k) => { if (champs[k] == null) delete champs[k]; });
   return { champs, a_verifier: [...new Set(a_verifier)], evenements, indices, mode, pages: meta.pages || 1, confiance: Math.round(confiance), texte_brut: texte.slice(0, 6000) };
