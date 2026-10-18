@@ -153,7 +153,7 @@ const PAGES = [
   ['#/tableau', 'Tableau de bord', 'tableau'], ['#/arrivees', 'Arrivées', 'arrivees'], ['#/departs', 'Départs', 'departs'],
   ['#/agenda', 'Agenda et alertes', 'agenda'], ['#/archives', 'Archives', 'archives'], ['#/rapports', 'Rapports', 'rapports'],
 ];
-const APP_VERSION = '2026-10-18-017';
+const APP_VERSION = '2026-10-18-018';
 const SUFFIXE_DEPART = '/MFPMA/ENA/EGAD';
 const SOUS_TITRES = { tableau: 'Vue d\'ensemble du secrétariat', arrivees: 'Registre du courrier arrivée', departs: 'Registre du courrier départ', agenda: 'Échéances, réunions et rappels', archives: 'Tous les documents, par année et par mois', rapports: 'Rapports d\'activité du secrétariat', parametres: 'Compte, référentiels et accès' };
 function coque(active, contenu) {
@@ -452,12 +452,12 @@ async function vueEnregistrer(sens) {
         <div class="champ"><label for="type">Type de courrier <span id="d-type"></span></label><select id="type"><option value="">—</option>${opt(etat.types.filter((t) => t.sens === 'les_deux' || t.sens === sens))}</select></div>
         ${estArr ? `<div class="champ"><label for="service">Destinataire interne <span id="d-service"></span></label>
           <div style="display:flex;gap:8px;align-items:center"><select id="service" style="flex:1 1 50%"><option value="">—</option>${etat.services.filter((x) => !x.parent_id && x.code !== 'EGAD').map((x) => `<option value="${x.id}" ${x.id === etat.profil.service_id ? 'selected' : ''}>${esc(x.nom)}${etat.services.some((y) => y.parent_id === x.id) ? ' ›' : ''}</option>`).join('')}</select><select id="service2" aria-label="Service de la direction" style="flex:1 1 50%;display:none"></select></div>
-          <input type="hidden" id="service_final"></div>` : `<div class="champ"><label>Émetteur</label><div style="padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-2);font-weight:600">École de gestion administrative et diplomatique</div><input type="hidden" id="service" value="${esc((etat.services.find((x) => x.code === 'EGAD') || {}).id || '')}"><input type="hidden" id="service_final" value="${esc((etat.services.find((x) => x.code === 'EGAD') || {}).id || '')}"><span class="aide">Tous les courriers départ partent de l'EGAD.</span></div>`}
+          <input type="hidden" id="service_final"></div>` : `<div class="champ"><label>Émetteur</label><div style="padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-2);font-weight:600">École de gestion administrative et de la diplomatie</div><input type="hidden" id="service" value="${esc((etat.services.find((x) => x.code === 'EGAD') || {}).id || '')}"><input type="hidden" id="service_final" value="${esc((etat.services.find((x) => x.code === 'EGAD') || {}).id || '')}"><span class="aide">Tous les courriers départ partent de l'EGAD.</span></div>`}
         <div class="champ"><label for="urgence">Niveau d'urgence <span id="d-urgence"></span></label><select id="urgence">${Object.entries(URGENCES).map(([k, l]) => `<option value="${k}" ${k === 'normal' ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="champ"><label for="cat">Catégorie</label><select id="cat"><option value="">—</option>${opt(etat.categories)}</select></div>
         ${estArr ? '' : `<div class="champ span2"><label for="signataire">Signataire <span id="d-signataire"></span></label><div style="display:flex;gap:8px;align-items:center"><select id="signataire" required style="flex:1 1 50%"><option value="">—</option>${(etat.signataires || []).map((g) => `<option value="${g.id}" data-interim="${g.interimaire ? 1 : 0}">${esc(g.fonction)}${g.nom ? ' · ' + esc(g.nom) : ''}</option>`).join('')}</select><input id="sign" placeholder="Nom de l'intérimaire" aria-label="Nom de l'intérimaire" style="flex:1 1 50%;display:none"></div></div>
         <div class="champ"><label for="mode">Mode d'envoi</label><select id="mode">${Object.entries(MODES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
-        <div class="champ span2"><label for="lie">En réponse au courrier arrivée</label><select id="lie"><option value="">— Aucun —</option>${(arrivees || []).map((a) => `<option value="${a.id}">${esc(a.numero_ordre)} · ${esc(a.objet).slice(0, 70)}</option>`).join('')}</select></div>`}
+        <div class="champ span2"><label for="lie">Ce départ répond-il à un courrier reçu ? (facultatif)</label><select id="lie"><option value="">— Non, courrier indépendant —</option>${(arrivees || []).map((a) => `<option value="${a.id}">${esc(a.numero_ordre)} · ${esc(a.objet).slice(0, 70)}</option>`).join('')}</select></div>`}
         <div class="champ"><label for="echeance">Échéance (facultatif) <span id="d-echeance"></span></label><input id="echeance" type="date"><span class="aide">Si renseignée, une alerte est programmée dans l'agenda 2 jours avant.</span></div>
         <div class="champ"><label><input type="checkbox" id="conf" style="width:18px;height:18px;accent-color:var(--vert-fonce)"> Courrier confidentiel</label><span class="aide">Exclu de la lecture automatique.</span></div>
       </div>
@@ -624,6 +624,7 @@ async function vueEnregistrer(sens) {
       };
       const { data: c, error } = await sb.from('courriers').insert(ligne).select('*').single(); if (error) throw error;
       if (statutFinal !== 'brouillon') apprendre(c).catch(() => {});
+      if (statutFinal !== 'brouillon' && c.sens === 'depart' && c.courrier_lie_id) sb.from('courriers').update({ statut: 'traite' }).eq('id', c.courrier_lie_id).in('statut', ['recu', 'transmis', 'a_traiter']).then(() => {});
       // scan : déplacé du dossier temporaire vers le dossier définitif du courrier
       if (scanTemp?.chemin || fichier) {
         const d = new Date(c.date_evenement); const nom = scanTemp?.nom || fichier.name; const type = scanTemp?.type || fichier.type; const taille = scanTemp?.taille || fichier.size;
